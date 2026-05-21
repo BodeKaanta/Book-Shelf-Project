@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "374852436729",
+    "project_id": "bookedex-cd74a",
+    "storage_bucket": "bookedex-cd74a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:374852436729:android:ac8df8728bec3e35dcd828",
+        "android_client_info": {
+          "package_name": "com.bookedex.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "374852436729-i9k5c85sq12qkqu1qq31k931890sfjll.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1Qw5D3KUU4gcWapXPILX12Q61bgfmsqE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "374852436729-i9k5c85sq12qkqu1qq31k931890sfjll.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
