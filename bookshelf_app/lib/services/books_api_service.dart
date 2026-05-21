@@ -40,7 +40,6 @@ class BooksApiService {
         .where((l) => !RegExp(r'^\d[\d:.,\s]*$').hasMatch(l)) // pure numbers
         .where((l) => !RegExp(r'^\d{1,2}:\d{2}').hasMatch(l)) // timestamps "13:24 A"
         .where((l) => !_isOcrGarbage(l)) // mixed-case OCR noise like "NoTEB O OK"
-        .take(12)
         .toList();
 
     if (lines.isEmpty) {
