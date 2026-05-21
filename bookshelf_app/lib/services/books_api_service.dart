@@ -64,11 +64,21 @@ class BooksApiService {
   }
 
   bool _isSuspiciousWord(String word) {
-    final isAllCaps = word == word.toUpperCase();
-    final isAllLower = word == word.toLowerCase();
-    final isTitleCase = word[0] == word[0].toUpperCase() &&
-        word.substring(1) == word.substring(1).toLowerCase();
-    return !isAllCaps && !isAllLower && !isTitleCase;
+    if (word == word.toUpperCase()) return false;
+    if (word == word.toLowerCase()) return false;
+
+    // Split at every lowercase→uppercase boundary to handle compound surnames
+    // e.g. "McCann" → ["Mc","Cann"], "FitzGerald" → ["Fitz","Gerald"]
+    // Then also split at non-alphabetic characters for names like "O'Brien"
+    final segments = word
+        .split(RegExp(r"(?<=[a-z])(?=[A-Z])|[^a-zA-Z]+"))
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    return !segments.every((s) =>
+        s == s.toUpperCase() ||
+        (s[0] == s[0].toUpperCase() &&
+            s.substring(1) == s.substring(1).toLowerCase()));
   }
 
   double _lineScore(String line) {
