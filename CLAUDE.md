@@ -74,6 +74,13 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 - Snake_case for Dart files
 - Never commit API keys — use environment variables, add .env to .gitignore
 
+## GitHub Workflow
+- One issue per feature/bug, one branch per issue
+- Branch naming: `task_X` where X is the issue number
+- Every PR body must include `Closes #X` — this auto-closes the issue and moves it to Done on the project board when merged. No manual board updates needed.
+- Size and assignee are set on the issue when it's created, not on the PR
+- `gh` CLI is installed at `C:\Program Files\GitHub CLI\gh.exe` (also in user PATH after terminal restart)
+
 ## Firebase / Data Notes
 - AI tagging happens at ingest time only (when a book is added) — NOT at recommendation time
 - Recommendations are served from pre-computed tags/metadata in Firestore — cheap database reads
