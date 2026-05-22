@@ -81,6 +81,12 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 - Size and assignee are set on the issue when it's created, not on the PR
 - `gh` CLI is installed at `C:\Program Files\GitHub CLI\gh.exe` (also in user PATH after terminal restart)
 
+## Code + Testing Protocol
+- **Always show the code change and explain it before applying it** — Bode is a student and wants to understand every change, not just see it happen
+- **Never commit until Bode has tested the change on the emulator and confirmed it works** — the commit represents a known-working state
+- The correct order is: write code → show and explain → apply edit → Bode tests → if good, then `git add` and commit → push → open PR
+- This is standard professional practice: you test before you commit, not after
+
 ## Firebase / Data Notes
 - AI tagging happens at ingest time only (when a book is added) — NOT at recommendation time
 - Recommendations are served from pre-computed tags/metadata in Firestore — cheap database reads
@@ -96,13 +102,20 @@ The POC screen (`lib/screens/poc_screen.dart`) is fully running on the Android e
 Recognition pipeline: ML Kit OCR → smart query builder → Google Books API → display top result + debug info.
 
 **Recognition results so far (clean photos):**
-- ✅ Working: Dream Hotel, Fair Play, The Castle, Lord of the Rings, Pines, Unbecoming, Transformed
-- ❌ Still failing: The Cruel Prince (ML Kit misreads "PRINCE" as "PBCE"), House of Government (title appears on line 15 — beyond the 12-line scan window)
-- 🔄 Needs retest with latest build: Project Hail Mary, The Notebook, Invisible Cities
+- ✅ Working: Dream Hotel, Fair Play, The Castle, Lord of the Rings, Pines, Unbecoming, Transformed, Project Hail Mary, The Notebook
+- ⚠️ Near miss: Apeirogon (correct book appears in other matches but not best match — blurb text outscores the title)
+- ❌ Still failing: The Cruel Prince (ML Kit physically misreads "PRINCE" as "PBCE" — image quality issue, not fixable in software), House of Government (garbled all-caps lines outscore the correct title-case title)
+- 🔄 Not yet tested: Invisible Cities
+- Current accuracy: ~9/12 tested = ~75%, possibly higher with more photos
+
+**Bugs fixed (issues #2 and #3):**
+- #2: Compound surnames (McCann, FitzGerald, O'Brien, DeLuca) were falsely flagged as OCR garbage — fixed with segment-split approach in `_isSuspiciousWord()`
+- #3: `.take(12)` scan window was cutting off valid lines — removed entirely, scoring function is the guard against noise
 
 **Query builder logic** (`lib/services/books_api_service.dart`):
 - Filters: pure numbers, timestamps (`13:24`-style), OCR garbage (>40% of words have suspicious mixed casing)
-- Scans first 12 lines, scores each line
+- Words split at lowercase→uppercase boundaries to allow compound surnames before checking for garbage
+- Scores ALL lines that pass filters (no scan window limit)
 - Scoring: ALL CAPS lines score high (book titles); title-case multi-word lines score 0.65 (author names like "Nicholas Sparks")
 - Builds query from top 3 scoring lines, max 120 chars
 
