@@ -69,7 +69,7 @@ class BooksApiService {
     final words = line.split(' ').where((w) => w.length >= 3).toList();
     if (words.isEmpty) return false;
     final garbageCount = words.where(_isSuspiciousWord).length;
-    return garbageCount / words.length > 0.4;
+    return garbageCount / words.length > 0.25;
   }
 
   bool _isSuspiciousWord(String word) {
