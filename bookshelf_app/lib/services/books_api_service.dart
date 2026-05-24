@@ -40,6 +40,7 @@ class BooksApiService {
         .where((l) => !RegExp(r'^\d[\d:.,\s]*$').hasMatch(l)) // pure numbers
         .where((l) => !RegExp(r'^\d{1,2}:\d{2}').hasMatch(l)) // timestamps "13:24 A"
         .where((l) => !_isOcrGarbage(l)) // mixed-case OCR noise like "NoTEB O OK"
+        .where((l) => !_isPromotionalLine(l)) // award/promo text like "LONGLISTED FOR THE"
         .toList();
 
     if (lines.isEmpty) {
@@ -55,6 +56,15 @@ class BooksApiService {
 
   // Filters lines where more than 40% of words have suspicious mixed casing
   // e.g. "NoTEB O OK", "TENZs", "DuK" — hallmarks of OCR misreads
+  bool _isPromotionalLine(String line) {
+    final upper = line.toUpperCase();
+    const keywords = [
+      'LONGLISTED', 'SHORTLISTED', 'PRIZE', 'AWARD', 'WINNER',
+      'BESTSELLER', 'BESTSELLING', 'FINALIST', 'BOOKER', 'PULITZER',
+    ];
+    return keywords.any((k) => upper.contains(k));
+  }
+
   bool _isOcrGarbage(String line) {
     final words = line.split(' ').where((w) => w.length >= 3).toList();
     if (words.isEmpty) return false;

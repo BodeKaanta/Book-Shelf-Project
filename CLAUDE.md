@@ -51,7 +51,10 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 - **No push notifications in MVP.** Margot turns off push notifications on almost every app. In-app prompts only, triggered on open.
 - **Mood quiz surfaces ONE book, not a list.** The whole point is solving choice paralysis.
 - **Quiz has only 2-3 questions.** Margot said "only 2 options."
-- **Approval screen uncertainty threshold:** high confidence = quick confirm; low confidence = show submitted photo + app's guess side by side, user says yes/no; unrecognized = manual input required.
+- **Approval screen uncertainty threshold:** two paths only:
+  1. High confidence (≥80%) → auto-add, user never sees it
+  2. Low confidence (<80%) → show submitted photo + best guess side by side → Yes = added, No = manual entry
+  - Edge case: if Google Books returns no results at all, skip straight to manual entry (no best guess to show)
 - **Free tier:** up to 100 books, 3 shelves. **Pro ($2.99/mo or $19.99/yr):** unlimited books, shelves, mood filters, auto-cat, CSV export, themes.
 
 ## Build Order — Follow This Sequence
