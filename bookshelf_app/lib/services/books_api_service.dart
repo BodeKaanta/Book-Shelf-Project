@@ -91,6 +91,9 @@ class BooksApiService {
   }
 
   double _lineScore(String line) {
+    // "Title: Author, First:" format — high-value metadata, score above blurb names
+    if (line.contains(':')) return 0.85;
+
     final letters = line
         .split('')
         .where((c) => RegExp(r'[a-zA-Z]').hasMatch(c))
