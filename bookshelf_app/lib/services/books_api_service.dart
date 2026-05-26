@@ -61,6 +61,7 @@ class BooksApiService {
     const keywords = [
       'LONGLISTED', 'SHORTLISTED', 'PRIZE', 'AWARD', 'WINNER',
       'BESTSELLER', 'BESTSELLING', 'FINALIST', 'BOOKER', 'PULITZER',
+      'INTRODUCTION',
     ];
     return keywords.any((k) => upper.contains(k));
   }
