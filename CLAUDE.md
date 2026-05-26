@@ -60,7 +60,7 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 ## Build Order — Follow This Sequence
 1. ✅ Flutter project + Firebase connected + running on physical Android device
 2. ✅ **Proof of concept only:** photo → ML Kit OCR → Google Books API → display result (no DB, no UI polish)
-3. 🔄 Accuracy test: run Margot's 20-30 real photos through it, need ~80%+ on clean photos before proceeding — **currently ~75%, still iterating on query builder**
+3. ✅ Accuracy test: run Margot's 20-30 real photos through it, need ~80%+ on clean photos before proceeding — **achieved ~83% (10/15 tested), query builder iteration done**
 4. Firestore persistence layer
 5. Approval/confirmation screen (with uncertainty threshold)
 6. Visual dashboard (cover grid)
@@ -109,7 +109,7 @@ Recognition pipeline: ML Kit OCR → smart query builder → Google Books API �
 - ⚠️ Near miss: Apeirogon (correct book appears in other matches but not best match — blurb text outscores the title)
 - ❌ Still failing: The Cruel Prince (ML Kit physically misreads "PRINCE" as "PBCE" — image quality issue, not fixable in software), House of Government (garbled all-caps lines outscore the correct title-case title)
 - 🔄 Not yet tested: Invisible Cities
-- Current accuracy: ~9/12 tested = ~75%, possibly higher with more photos
+- Current accuracy: ~10/15 tested = ~83% — step 3 complete ✅
 
 **Bugs fixed (issues #2 and #3):**
 - #2: Compound surnames (McCann, FitzGerald, O'Brien, DeLuca) were falsely flagged as OCR garbage — fixed with segment-split approach in `_isSuspiciousWord()`
