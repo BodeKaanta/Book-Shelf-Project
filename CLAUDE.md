@@ -84,6 +84,23 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 - Size and assignee are set on the issue when it's created, not on the PR
 - `gh` CLI is installed at `C:\Program Files\GitHub CLI\gh.exe` (also in user PATH after terminal restart)
 
+### Creating issues — always follow this checklist:
+1. `gh issue create` with `--assignee BodeKaanta` and `--label "Task"`
+2. Add to the project board and get the item ID:
+   ```
+   gh api graphql -f query='mutation { addProjectV2ItemById(input: { projectId: "PVT_kwHOBJc_rc4BW00y", contentId: "<issue-node-id>" }) { item { id } } }'
+   ```
+3. Set the Size field on the project item (S for small, M for medium, L for large):
+   ```
+   gh api graphql -f query='mutation { updateProjectV2ItemFieldValue(input: { projectId: "PVT_kwHOBJc_rc4BW00y" itemId: "<item-id>" fieldId: "PVTSSF_lAHOBJc_rc4BW00yzhSGANw" value: { singleSelectOptionId: "<size-id>" } }) { projectV2Item { id } } }'
+   ```
+   Size option IDs: S = `f784b110`, M = `7515a9f1`, L = `817d0097`
+   Project ID: `PVT_kwHOBJc_rc4BW00y`
+   Size field ID: `PVTSSF_lAHOBJc_rc4BW00yzhSGANw`
+
+### Updating CLAUDE.md:
+- Always edit CLAUDE.md locally as a file and commit it through git — never via the GitHub API directly
+
 ## Code + Testing Protocol
 - **Always show the code change and explain it before applying it** — Bode is a student and wants to understand every change, not just see it happen
 - **Never commit until Bode has tested the change on the emulator and confirmed it works** — the commit represents a known-working state
@@ -127,7 +144,7 @@ Recognition pipeline: ML Kit OCR → smart query builder → Google Books API �
 bookshelf_app/lib/
 ├── main.dart                        — Firebase init, dotenv, ProviderScope → PocScreen
 ├── core/constants.dart              — googleBooksBaseUrl
-├── models/book.dart                 — Book model, fromGoogleBooksJson factory
+├── models/book.dart                 — Book model, fromGoogleBooksJson, fromFirestore, toFirestore (id, googleBooksId, dateAdded, genre, pageCount)
 ├── services/book_recognition_service.dart  — ML Kit OCR, returns raw String
 ├── services/books_api_service.dart  — query builder + Google Books API call
 ├── providers/recognition_provider.dart     — RecognitionState (books, extractedText, searchQuery)
