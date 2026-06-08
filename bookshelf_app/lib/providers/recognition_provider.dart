@@ -2,7 +2,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/book.dart';
 import '../services/book_recognition_service.dart';
+import '../services/book_repository.dart';
 import '../services/books_api_service.dart';
+
+final bookRepositoryProvider = Provider<BookRepository>((_) => BookRepository());
 
 class RecognitionState {
   final AsyncValue<List<Book>> books;
@@ -29,8 +32,9 @@ class RecognitionState {
 }
 
 class RecognitionNotifier extends StateNotifier<RecognitionState> {
-  RecognitionNotifier() : super(const RecognitionState());
+  RecognitionNotifier(this._ref) : super(const RecognitionState());
 
+  final Ref _ref;
   final _recognitionService = BookRecognitionService();
   final _booksApiService = BooksApiService();
 
@@ -54,9 +58,13 @@ class RecognitionNotifier extends StateNotifier<RecognitionState> {
       state = state.copyWith(books: AsyncValue.error(e, st));
     }
   }
+
+  Future<void> saveBook(Book book) async {
+    await _ref.read(bookRepositoryProvider).addBook(book);
+  }
 }
 
 final recognitionProvider =
     StateNotifierProvider<RecognitionNotifier, RecognitionState>(
-  (_) => RecognitionNotifier(),
+  (ref) => RecognitionNotifier(ref),
 );
