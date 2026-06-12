@@ -61,7 +61,7 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 1. ✅ Flutter project + Firebase connected + running on physical Android device
 2. ✅ **Proof of concept only:** photo → ML Kit OCR → Google Books API → display result (no DB, no UI polish)
 3. ✅ Accuracy test: run Margot's 20-30 real photos through it, need ~80%+ on clean photos before proceeding — **achieved ~83% (10/15 tested), query builder iteration done**
-4. Firestore persistence layer
+4. ✅ Firestore persistence layer
 5. Approval/confirmation screen (with uncertainty threshold)
 6. Visual dashboard (cover grid)
 7. Book detail sidebar
