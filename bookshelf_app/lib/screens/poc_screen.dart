@@ -14,6 +14,7 @@ class PocScreen extends ConsumerStatefulWidget {
 
 class _PocScreenState extends ConsumerState<PocScreen> {
   XFile? _selectedImage;
+  bool _saving = false;
   final _picker = ImagePicker();
 
   Future<void> _pickImage() async {
@@ -21,6 +22,16 @@ class _PocScreenState extends ConsumerState<PocScreen> {
     if (image == null) return;
     setState(() => _selectedImage = image);
     await ref.read(recognitionProvider.notifier).recognizeFromImage(image);
+  }
+
+  Future<void> _saveBook(Book book) async {
+    setState(() => _saving = true);
+    final saved = await ref.read(recognitionProvider.notifier).saveBook(book);
+    setState(() => _saving = false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(saved ? 'Book saved!' : 'Already in your library.')),
+    );
   }
 
   @override
@@ -80,6 +91,20 @@ class _PocScreenState extends ConsumerState<PocScreen> {
           ),
           const SizedBox(height: 8),
           _BookResultCard(book: books.first, isTopResult: true),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _saving ? null : () => _saveBook(books.first),
+              child: _saving
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save Book'),
+            ),
+          ),
           if (books.length > 1) ...[
             const SizedBox(height: 12),
             const Text(
