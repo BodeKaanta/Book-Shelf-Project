@@ -10,8 +10,16 @@ class BookRepository {
     return _firestore.collection('users').doc(uid).collection('books');
   }
 
-  Future<void> addBook(Book book) async {
+  Future<bool> addBook(Book book) async {
+    if (book.googleBooksId != null) {
+      final existing = await _booksCollection
+          .where('googleBooksId', isEqualTo: book.googleBooksId)
+          .limit(1)
+          .get();
+      if (existing.docs.isNotEmpty) return false;
+    }
     await _booksCollection.add(book.toFirestore());
+    return true;
   }
 
   Stream<List<Book>> watchBooks() {
