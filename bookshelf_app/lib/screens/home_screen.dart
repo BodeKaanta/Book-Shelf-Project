@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/book.dart';
 import '../providers/books_provider.dart';
+import 'library_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -37,7 +38,13 @@ class HomeScreen extends ConsumerWidget {
             ListTile(
               leading: const Icon(Icons.grid_view),
               title: const Text('Full Library'),
-              onTap: () {}, // wired to LibraryScreen in #32/#33
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LibraryScreen()),
+                );
+              },
             ),
             ListTile(
               leading: const Icon(Icons.settings),
@@ -131,7 +138,10 @@ class _BookRow extends StatelessWidget {
               ),
               if (showSeeAll)
                 TextButton(
-                  onPressed: () {}, // opens Library screen in #31
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LibraryScreen()),
+                  ),
                   child: const Text('See all'),
                 ),
             ],
