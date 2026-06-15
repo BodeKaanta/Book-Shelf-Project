@@ -62,8 +62,8 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 2. ✅ **Proof of concept only:** photo → ML Kit OCR → Google Books API → display result (no DB, no UI polish)
 3. ✅ Accuracy test: run Margot's 20-30 real photos through it, need ~80%+ on clean photos before proceeding — **achieved ~83% (10/15 tested), query builder iteration done**
 4. ✅ Firestore persistence layer
-5. Visual dashboard (cover grid) ← **NEXT** — building this before approval screen; Richie's Figma design is ready
-6. Approval/confirmation screen (with uncertainty threshold) — full design spec in section below
+5. ✅ Visual dashboard — Home screen (Netflix-style rows) + Library screen (3-column grid, genre filter chips) + bottom nav (Home, Search, Capture, Import, Discover) + hamburger drawer (Full Library, Settings)
+6. Approval/confirmation screen (with uncertainty threshold) ← **NEXT** — full design spec in section below
 7. Book detail sidebar
 8. Basic shelves and manual tags
 9. Mood quiz → ONE recommendation flow
