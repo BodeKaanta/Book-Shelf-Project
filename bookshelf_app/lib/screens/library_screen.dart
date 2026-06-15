@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/book.dart';
 import '../providers/books_provider.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
@@ -28,7 +29,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.sort),
-            onPressed: () {}, // sort logic in a future issue
+            onPressed: () {},
           ),
         ],
       ),
@@ -37,12 +38,45 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         children: [
           _buildFilterBar(booksAsync),
           const Divider(height: 1),
-          const Expanded(
-            child: Center(
-              child: Text(
-                'Grid coming in #33',
-                style: TextStyle(color: Colors.grey),
-              ),
+          Expanded(
+            child: booksAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(child: Text('Error: $e')),
+              data: (books) {
+                final sorted = [...books]
+                  ..sort((a, b) => a.title.compareTo(b.title));
+                final filtered = _selectedGenre == 'All'
+                    ? sorted
+                    : sorted
+                        .where((b) => b.genre == _selectedGenre)
+                        .toList();
+
+                if (filtered.isEmpty) {
+                  return Center(
+                    child: Text(
+                      _selectedGenre == 'All'
+                          ? 'No books yet — tap Import to add your first book.'
+                          : 'No books tagged "$_selectedGenre" yet.',
+                      style: const TextStyle(color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                  );
+                }
+
+                return GridView.builder(
+                  padding: const EdgeInsets.all(12),
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    childAspectRatio: 0.67,
+                  ),
+                  itemCount: filtered.length,
+                  itemBuilder: (context, index) =>
+                      _GridTile(book: filtered[index]),
+                );
+              },
             ),
           ),
         ],
@@ -98,6 +132,63 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+class _GridTile extends StatelessWidget {
+  final Book book;
+
+  const _GridTile({required this.book});
+
+  @override
+  Widget build(BuildContext context) {
+    final url = book.coverUrl?.replaceFirst('http://', 'https://');
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          url != null
+              ? Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _placeholder(),
+                )
+              : _placeholder(),
+          if (book.genre != null && book.genre!.isNotEmpty)
+            Positioned(
+              bottom: 6,
+              left: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  book.genre!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _placeholder() {
+    return Container(
+      color: Colors.grey[200],
+      child: const Icon(Icons.book, color: Colors.grey, size: 32),
     );
   }
 }
