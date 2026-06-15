@@ -62,8 +62,8 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 2. ✅ **Proof of concept only:** photo → ML Kit OCR → Google Books API → display result (no DB, no UI polish)
 3. ✅ Accuracy test: run Margot's 20-30 real photos through it, need ~80%+ on clean photos before proceeding — **achieved ~83% (10/15 tested), query builder iteration done**
 4. ✅ Firestore persistence layer
-5. Approval/confirmation screen (with uncertainty threshold)
-6. Visual dashboard (cover grid)
+5. Visual dashboard (cover grid) ← **NEXT** — building this before approval screen; Richie's Figma design is ready
+6. Approval/confirmation screen (with uncertainty threshold) — full design spec in section below
 7. Book detail sidebar
 8. Basic shelves and manual tags
 9. Mood quiz → ONE recommendation flow
@@ -100,6 +100,14 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 
 ### Updating CLAUDE.md:
 - Always edit CLAUDE.md locally as a file and commit it through git — never via the GitHub API directly
+
+## Starting a New Session
+Always run these three commands at the start of a session to orient yourself before doing anything:
+```
+gh pr list --state open
+gh issue list --label "Task" --state open
+```
+Then check the Build Order section to see the current step. The open issues tell you what's already planned; the open PRs tell you what's waiting to be merged. Don't create duplicate issues for work that's already tracked.
 
 ## Code + Testing Protocol
 - **Always show the code change and explain it before applying it** — Bode is a student and wants to understand every change, not just see it happen
@@ -139,16 +147,68 @@ Recognition pipeline: ML Kit OCR → smart query builder → Google Books API �
 - Scoring: ALL CAPS lines score high (book titles); title-case multi-word lines score 0.65 (author names like "Nicholas Sparks")
 - Builds query from top 3 scoring lines, max 120 chars
 
+## Dashboard Design Notes (Step 5 — Current)
+Richie's Figma prototype: https://www.figma.com/make/QjDuOmFO2heo8XJkhrGesw/Design-Bookedex-Library-Screen
+
+**What Richie designed:**
+- Header: "Bookedex" title + "Good afternoon, [name]" greeting + user avatar
+- Filter bar: sort icon + `+ Tag` button + mood filter chips (All, Cozy, Quick Read, Fiction, Intense, Feel Good, Classic…)
+- Grid: 3-column masonry-style grid of book cover photos, each with 1–2 mood tag chips overlaid at bottom-left
+- Bottom nav: Search, Capture, Import, Settings, Discover (5 tabs)
+
+**Implementation notes:**
+- Data is already in Firestore (`watchBooks()` stream is ready) — this step is mostly UI
+- Each cover tile shows the `coverUrl` from the Book model (Google Books thumbnail URL)
+- Mood tags on covers come from the `genre` field — for now display genre as the tag
+- "Capture" bottom nav tab → entry point into capture flow (camera)
+- "Import" bottom nav tab → entry point into batch photo import → feeds approval screen (step 6)
+- GitHub issues for this step: **not yet created** — create them at the start of the session for step 5
+
+## Approval Screen Design Notes (Step 6 — After Dashboard)
+**Concept:** Tinder-style swipe card UI. Only shown for books the system is uncertain about.
+
+**Confidence threshold:**
+- ≥80% confidence → auto-save silently, user never sees the card
+- <80% confidence OR no OCR results → added to the approval queue
+
+**Confidence scoring approach (not yet implemented):**
+Derive a 0.0–1.0 score from the gap between the top result's internal query score and the second result's score. Large gap = high confidence. This requires changes to `BooksApiService` to expose the score alongside results.
+
+**Swipe gestures:**
+- Swipe right → save the book to library
+- Swipe left → skip/discard (book is not saved)
+- Swipe up → open manual search overlay (keyboard rises, search bar at top, live results)
+
+**Queue ordering:** Most confident first → least confident last. User gets easy confirms first and only has to type manually for the genuinely hard ones at the end.
+
+**No-OCR state:** When OCR returned no usable text at all, the card shows the photo with "We couldn't read this one" and disables the right swipe — user must either search manually (swipe up) or skip (swipe left).
+
+**Manual search overlay:**
+- Triggered by swipe up
+- Search bar at top, keyboard opens immediately
+- Debounced Google Books API call as user types (Netflix-style live filtering)
+- Tapping a result saves that book and advances to the next card
+
+**POC screen note:** `poc_screen.dart` stays alive as a dev tool during step 6 development so books can still be added for testing the dashboard. Remove or repurpose it when step 6 is fully wired in.
+
+**Planned GitHub issues (not yet created — create at start of step 6 session):**
+- A. Add confidence score to `BooksApiService` search results (S)
+- B. Confidence-based routing — auto-save ≥80%, queue <80% into approval flow (S)
+- C. Build approval screen — tinder swipe card UI with all 3 states (L)
+- D. Build manual search overlay — debounced live Google Books results (M)
+- E. Wire approval screen into app, replace POC Save Book button (S)
+
 ## Key Files
 ```
 bookshelf_app/lib/
-├── main.dart                        — Firebase init, dotenv, ProviderScope → PocScreen
+├── main.dart                        — Firebase init, dotenv, anonymous auth, ProviderScope → PocScreen
 ├── core/constants.dart              — googleBooksBaseUrl
 ├── models/book.dart                 — Book model, fromGoogleBooksJson, fromFirestore, toFirestore (id, googleBooksId, dateAdded, genre, pageCount)
 ├── services/book_recognition_service.dart  — ML Kit OCR, returns raw String
 ├── services/books_api_service.dart  — query builder + Google Books API call
-├── providers/recognition_provider.dart     — RecognitionState (books, extractedText, searchQuery)
-└── screens/poc_screen.dart          — POC UI: pick photo, show results + debug text
+├── services/book_repository.dart    — BookRepository: addBook (with duplicate check), watchBooks, deleteBook
+├── providers/recognition_provider.dart     — RecognitionState, bookRepositoryProvider, RecognitionNotifier (recognizeFromImage, saveBook)
+└── screens/poc_screen.dart          — DEV TOOL: pick photo, show results, save book button — temporary until step 6
 ```
 
 ## Roadmap
