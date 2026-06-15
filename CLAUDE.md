@@ -201,13 +201,18 @@ Derive a 0.0–1.0 score from the gap between the top result's internal query sc
 ## Key Files
 ```
 bookshelf_app/lib/
-├── main.dart                        — Firebase init, dotenv, anonymous auth, ProviderScope → PocScreen
+├── main.dart                        — Firebase init, dotenv, anonymous auth, ProviderScope → MainScaffold
 ├── core/constants.dart              — googleBooksBaseUrl
 ├── models/book.dart                 — Book model, fromGoogleBooksJson, fromFirestore, toFirestore (id, googleBooksId, dateAdded, genre, pageCount)
 ├── services/book_recognition_service.dart  — ML Kit OCR, returns raw String
 ├── services/books_api_service.dart  — query builder + Google Books API call
 ├── services/book_repository.dart    — BookRepository: addBook (with duplicate check), watchBooks, deleteBook
 ├── providers/recognition_provider.dart     — RecognitionState, bookRepositoryProvider, RecognitionNotifier (recognizeFromImage, saveBook)
+├── providers/books_provider.dart    — booksStreamProvider: StreamProvider<List<Book>> wrapping watchBooks()
+├── screens/main_scaffold.dart       — 5-tab NavigationBar shell (Home, Search, Capture, Import, Discover) + IndexedStack
+├── screens/home_screen.dart         — Home screen: Netflix-style rows (Your Library + genre rows) + hamburger drawer
+├── screens/library_screen.dart      — Library screen: 3-column grid, genre filter chips, alphabetical sort
+├── screens/placeholder_screen.dart  — Reusable placeholder for Search, Capture, Discover tabs
 └── screens/poc_screen.dart          — DEV TOOL: pick photo, show results, save book button — temporary until step 6
 ```
 
