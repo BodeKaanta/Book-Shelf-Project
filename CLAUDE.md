@@ -197,6 +197,7 @@ Derive a 0.0–1.0 score from the gap between the top result's internal query sc
 - C. Build approval screen — tinder swipe card UI with all 3 states (L)
 - D. Build manual search overlay — debounced live Google Books results (M)
 - E. Wire approval screen into app, replace POC Save Book button (S)
+- F. Spatial filtering for OCR query builder — use ML Kit bounding box data to downweight text in the bottom ~30% of the image (TikTok caption area). Fixes TikTok screenshots on physical devices where the newer ML Kit model reads caption text and garbled fragments that outscore the actual book title. Affects `BookRecognitionService` (return structured text+position data instead of raw String) and `BooksApiService` (score lines by vertical position). (M)
 
 ## Key Files
 ```
