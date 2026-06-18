@@ -12,24 +12,46 @@ class BooksApiService {
     final query = _buildSearchQuery(rawOcrText);
     if (query.isEmpty) return (books: <Book>[], query: '');
 
+    // Apply OCR corrections first — fall back to original if corrections break the query
+    final correctedQuery = _applyOcrCorrections(query);
+    if (correctedQuery != query) {
+      final correctedResult = await _fetchBooks(correctedQuery);
+      if (correctedResult != null) {
+        return (books: correctedResult, query: correctedQuery);
+      }
+    }
+
+    // Use original query (either no corrections needed, or corrections returned nothing)
+    final result = await _fetchBooks(query);
+    return (books: result ?? <Book>[], query: query);
+  }
+
+  Future<List<Book>?> _fetchBooks(String query) async {
     final apiKey = dotenv.env['GOOGLE_BOOKS_API_KEY'] ?? '';
     final uri = Uri.parse(
       '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=5&key=$apiKey',
     );
 
     final response = await http.get(uri);
-    if (response.statusCode != 200) return (books: <Book>[], query: query);
+    if (response.statusCode != 200) return null;
 
     final data = json.decode(response.body) as Map<String, dynamic>;
     final items = data['items'] as List<dynamic>?;
-    if (items == null) return (books: <Book>[], query: query);
+    if (items == null) return null;
 
-    final books = items
+    return items
         .whereType<Map<String, dynamic>>()
         .map(Book.fromGoogleBooksJson)
         .toList();
+  }
 
-    return (books: books, query: query);
+  String _applyOcrCorrections(String query) {
+    return query
+        // V at word start before a vowel → Y (VEAR→YEAR, VELLOW→YELLOW)
+        .replaceAllMapped(
+          RegExp(r'\bV([AEIOU])'),
+          (m) => 'Y${m[1]}',
+        );
   }
 
   String _buildSearchQuery(String rawText) {
