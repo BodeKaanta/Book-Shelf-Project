@@ -25,7 +25,8 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 ## MVP Scope (Phase 1) — Build This, Nothing Else
 **Capture:**
 - Camera → ML Kit OCR → Google Books API → approval screen
-- Photo library batch import (individual confirm + "approve all" button) — includes screenshots (TikTok, Instagram, etc.), not just camera photos. Screenshot support is core functionality: the founding idea is "photos of books on your camera roll go in one place," and camera rolls are full of screenshots.
+- Photo library batch import (individual confirm + "approve all" button) — includes screenshots (TikTok, Instagram, etc.), not just camera photos
+- **Screenshot support is core functionality of the app — not an "MVP feature" and not phase-gated.** The founding idea is "pictures of books on your camera roll go in one place," and camera rolls are full of screenshots. It is never deferred, descoped, or treated as optional — a capture pipeline that can't handle screenshots is incomplete.
 - Manual title/author entry fallback when recognition fails
 
 **Library:**
@@ -234,5 +235,5 @@ bookshelf_app/lib/
 |---|---|---|
 | MVP Build | May–Jul 2026 | Camera capture, visual library, mood quiz, in-app prompts |
 | Beta | Aug–Sep 2026 | 20-50 users, mood tagging, iterate on UX |
-| Launch v1.0 | Oct 2026 | Google Play, free + Pro tiers live |
+| Launch v1.0 | Oct 2026 | Google Play, free + Pro tiers live — complete the pre-launch security steps in "API Keys & Secrets" first (App Check + key restrictions) |
 | Phase 2 | Q1 2027 | iOS, AI auto-tagging, social sharing |
