@@ -25,7 +25,7 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 ## MVP Scope (Phase 1) — Build This, Nothing Else
 **Capture:**
 - Camera → ML Kit OCR → Google Books API → approval screen
-- Photo library batch import (individual confirm + "approve all" button)
+- Photo library batch import (individual confirm + "approve all" button) — includes screenshots (TikTok, Instagram, etc.), not just camera photos. Screenshot support is core functionality: the founding idea is "photos of books on your camera roll go in one place," and camera rolls are full of screenshots.
 - Manual title/author entry fallback when recognition fails
 
 **Library:**
@@ -40,7 +40,6 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 
 ## NOT in MVP — Do Not Build Yet
 - AI auto-tagging (Phase 2)
-- Screenshot OCR/text recognition (Phase 2)
 - Series awareness (Phase 2)
 - External recommendations (Phase 3)
 - Goodreads/StoryGraph import (Phase 3)
@@ -60,7 +59,7 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 ## Build Order — Follow This Sequence
 1. ✅ Flutter project + Firebase connected + running on physical Android device
 2. ✅ **Proof of concept only:** photo → ML Kit OCR → Google Books API → display result (no DB, no UI polish)
-3. ✅ Accuracy test: run Margot's 20-30 real photos through it, need ~80%+ on clean photos before proceeding — **achieved ~83% (10/15 tested), query builder iteration done**
+3. ✅ Accuracy test (initial pass): 9 of 12 tested clean photos correct (75%) — query builder iteration done. **Re-run with the full 20–30 photo set after the OCR spatial filtering work (#46) to properly confirm the 80% gate.**
 4. ✅ Firestore persistence layer
 5. ✅ Visual dashboard — Home screen (Netflix-style rows) + Library screen (3-column grid, genre filter chips) + bottom nav (Home, Search, Capture, Import, Discover) + hamburger drawer (Full Library, Settings)
 6. Approval/confirmation screen (with uncertainty threshold) ← **NEXT** — full design spec in section below
@@ -119,11 +118,13 @@ Then check the Build Order section to see the current step. The open issues tell
 - AI tagging happens at ingest time only (when a book is added) — NOT at recommendation time
 - Recommendations are served from pre-computed tags/metadata in Firestore — cheap database reads
 - Open-ended AI queries are Pro-only with daily limits (when we get there)
-- Cloud Storage not used in MVP — book cover art is stored as Google Books API URLs in Firestore, no file storage needed. Revisit in Phase 2 for screenshot import.
+- Cloud Storage not used in MVP — book cover art is stored as Google Books API URLs in Firestore, no file storage needed. (Screenshot import doesn't change this: screenshots are matched to a Google Books result and only the cover URL is stored.) Revisit in Phase 2 only if we ever need to keep the user's original photo as a fallback cover.
 
-## API Keys
-- Google Books API key: stored in `bookshelf_app/.env` as `GOOGLE_BOOKS_API_KEY` — loaded via `flutter_dotenv`. File is gitignored.
-- Never commit secrets to git
+## API Keys & Secrets
+- **Google Books API calls are made WITHOUT an API key** — the volumes endpoint doesn't require one (PR #48 removed the key and `flutter_dotenv`). Never add a key back to the client: anything bundled in the APK (assets, dart-defines, string constants) is extractable by anyone with a build.
+- The Firebase keys in `firebase_options.dart` / `google-services.json` are identifiers, not secrets — safe to commit. Data access is enforced by Firestore security rules, not by hiding these keys.
+- **Before public launch:** enable Firebase App Check, and add Android package name + SHA-1 restrictions to the Firebase API keys in Google Cloud Console.
+- Never commit secrets to git. If a real secret is ever needed (paid API, etc.), it belongs behind a Cloud Function — never in the app.
 
 ## POC Status (as of May 2026)
 The POC screen (`lib/screens/poc_screen.dart`) is fully running on the Android emulator.
@@ -132,29 +133,30 @@ Recognition pipeline: ML Kit OCR → smart query builder → Google Books API �
 **Recognition results so far (clean photos):**
 - ✅ Working: Dream Hotel, Fair Play, The Castle, Lord of the Rings, Pines, Unbecoming, Transformed, Project Hail Mary, The Notebook
 - ⚠️ Near miss: Apeirogon (correct book appears in other matches but not best match — blurb text outscores the title)
-- ❌ Still failing: The Cruel Prince (ML Kit physically misreads "PRINCE" as "PBCE" — image quality issue, not fixable in software), House of Government (garbled all-caps lines outscore the correct title-case title)
+- ❌ Still failing: The Cruel Prince (ML Kit misreads "PRINCE" as "PBCE" — candidate for fuzzy title matching against API results, see planned issue G), House of Government (garbled all-caps lines outscore the correct title-case title)
 - 🔄 Not yet tested: Invisible Cities
-- Current accuracy: ~10/15 tested = ~83% — step 3 complete ✅
+- Current accuracy: 9 of 12 tested = 75% (counts from the lists above) — full 20–30 photo re-test planned after #46 lands, before declaring the 80% gate passed
 
 **Bugs fixed (issues #2 and #3):**
 - #2: Compound surnames (McCann, FitzGerald, O'Brien, DeLuca) were falsely flagged as OCR garbage — fixed with segment-split approach in `_isSuspiciousWord()`
 - #3: `.take(12)` scan window was cutting off valid lines — removed entirely, scoring function is the guard against noise
 
 **Query builder logic** (`lib/services/books_api_service.dart`):
-- Filters: pure numbers, timestamps (`13:24`-style), OCR garbage (>40% of words have suspicious mixed casing)
+- Filters: pure numbers, timestamps (`13:24`-style), OCR garbage (>25% of words have suspicious mixed casing), promotional lines (LONGLISTED, BESTSELLER, PRIZE, etc.)
 - Words split at lowercase→uppercase boundaries to allow compound surnames before checking for garbage
 - Scores ALL lines that pass filters (no scan window limit)
-- Scoring: ALL CAPS lines score high (book titles); title-case multi-word lines score 0.65 (author names like "Nicholas Sparks")
+- Scoring: lines containing `:` score 0.85 (metadata format); ALL CAPS lines score high (book titles); title-case multi-word lines score 0.65 (author names like "Nicholas Sparks"); lines >25 chars are penalized
+- OCR corrections applied first (`_applyOcrCorrections`, e.g. word-initial V before vowel → Y), falls back to the uncorrected query if the corrected one returns nothing
 - Builds query from top 3 scoring lines, max 120 chars
 
-## Dashboard Design Notes (Step 5 — Current)
+## Dashboard Design Notes (Step 5 — Done)
 Richie's Figma prototype: https://www.figma.com/make/QjDuOmFO2heo8XJkhrGesw/Design-Bookedex-Library-Screen
 
 **What Richie designed:**
 - Header: "Bookedex" title + "Good afternoon, [name]" greeting + user avatar
 - Filter bar: sort icon + `+ Tag` button + mood filter chips (All, Cozy, Quick Read, Fiction, Intense, Feel Good, Classic…)
 - Grid: 3-column masonry-style grid of book cover photos, each with 1–2 mood tag chips overlaid at bottom-left
-- Bottom nav: Search, Capture, Import, Settings, Discover (5 tabs)
+- Bottom nav in Richie's design: Search, Capture, Import, Settings, Discover — **superseded**. Final implemented nav is **Home, Search, Capture, Import, Discover**; Settings lives in the hamburger drawer.
 
 **Implementation notes:**
 - Data is already in Firestore (`watchBooks()` stream is ready) — this step is mostly UI
@@ -162,7 +164,6 @@ Richie's Figma prototype: https://www.figma.com/make/QjDuOmFO2heo8XJkhrGesw/Desi
 - Mood tags on covers come from the `genre` field — for now display genre as the tag
 - "Capture" bottom nav tab → entry point into capture flow (camera)
 - "Import" bottom nav tab → entry point into batch photo import → feeds approval screen (step 6)
-- GitHub issues for this step: **not yet created** — create them at the start of the session for step 5
 
 ## Approval Screen Design Notes (Step 6 — After Dashboard)
 **Concept:** Tinder-style swipe card UI. Only shown for books the system is uncertain about.
@@ -173,6 +174,8 @@ Richie's Figma prototype: https://www.figma.com/make/QjDuOmFO2heo8XJkhrGesw/Desi
 
 **Confidence scoring approach (not yet implemented):**
 Derive a 0.0–1.0 score from the gap between the top result's internal query score and the second result's score. Large gap = high confidence. This requires changes to `BooksApiService` to expose the score alongside results.
+
+**Calibration requirement:** the gap-based score is a homemade heuristic, not a real probability — "80%" on it means nothing until measured. Before trusting silent auto-add, run Margot's photo set through the scorer and check where correct vs. wrong matches actually land, then set the threshold from that data. Safety net for beta: auto-adds show a brief "Added [title]" toast with an Undo button, so silent additions are never invisible.
 
 **Swipe gestures:**
 - Swipe right → save the book to library
@@ -191,13 +194,22 @@ Derive a 0.0–1.0 score from the gap between the top result's internal query sc
 
 **POC screen note:** `poc_screen.dart` stays alive as a dev tool during step 6 development so books can still be added for testing the dashboard. Remove or repurpose it when step 6 is fully wired in.
 
-**Planned GitHub issues (not yet created — create at start of step 6 session):**
-- A. Add confidence score to `BooksApiService` search results (S)
-- B. Confidence-based routing — auto-save ≥80%, queue <80% into approval flow (S)
-- C. Build approval screen — tinder swipe card UI with all 3 states (L)
-- D. Build manual search overlay — debounced live Google Books results (M)
-- E. Wire approval screen into app, replace POC Save Book button (S)
-- F. Spatial filtering for OCR query builder — use ML Kit bounding box data to downweight text in the bottom ~30% of the image (TikTok caption area). Fixes TikTok screenshots on physical devices where the newer ML Kit model reads caption text and garbled fragments that outscore the actual book title. Affects `BookRecognitionService` (return structured text+position data instead of raw String) and `BooksApiService` (score lines by vertical position). (M)
+**GitHub issues for step 6 (created 2026-06-18):**
+- A. #41 — Add confidence score to `BooksApiService` search results (S)
+- B. #42 — Confidence-based routing — auto-save ≥80%, queue <80% into approval flow (S)
+- C. #43 — Build approval screen — tinder swipe card UI with all 3 states (L)
+- D. #44 — Build manual search overlay — debounced live Google Books results (M)
+- E. #45 — Wire approval screen into app, replace POC Save Book button (S)
+- F. #46 — Screenshot-aware OCR filtering (M). Fixes TikTok screenshots where UI text (top AND bottom) outscores the actual book title. Agreed design:
+  1. **Detect screenshots first** — image dimensions exactly match a device screen resolution / ~9:16 aspect ratio, no camera EXIF data. Camera photos skip all of the following, so the clean-photo accuracy results are untouched.
+  2. **Zone downweighting** — penalize (don't discard) text in the top ~15% and bottom ~30% of detected screenshots (TikTok nav + caption areas).
+  3. **Social-UI text filtering** — drop lines matching social patterns: `@handles`, `#hashtags`, known UI strings ("For You", "Following", "Add comment"), counts like "1.2M".
+  4. **Text-size weighting** — use ML Kit bounding box heights: book titles are large display type, captions/usernames are small UI text.
+  - Affects `BookRecognitionService` (return structured text + position + size data instead of raw String) and `BooksApiService` (incorporate the new signals into line scoring).
+  - **After implementing: re-run the full clean-photo test set** — the scoring function is load-bearing for the accuracy gate.
+
+**Planned but not yet created:**
+- G. Fuzzy title matching — rescore Google Books candidates by edit distance between candidate title/author and the OCR lines, so misreads like "PBCE"→"PRINCE" (The Cruel Prince) and garbled lines (House of Government) can still match the right book. (M)
 
 ## Key Files
 ```
@@ -223,4 +235,4 @@ bookshelf_app/lib/
 | MVP Build | May–Jul 2026 | Camera capture, visual library, mood quiz, in-app prompts |
 | Beta | Aug–Sep 2026 | 20-50 users, mood tagging, iterate on UX |
 | Launch v1.0 | Oct 2026 | Google Play, free + Pro tiers live |
-| Phase 2 | Q1 2027 | iOS, AI auto-tagging, screenshot OCR, social sharing |
+| Phase 2 | Q1 2027 | iOS, AI auto-tagging, social sharing |
