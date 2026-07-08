@@ -3,6 +3,9 @@ import 'package:http/http.dart' as http;
 import '../core/constants.dart';
 import '../models/book.dart';
 
+// Injected at build time: flutter run --dart-define-from-file=.env
+const _apiKey = String.fromEnvironment('GOOGLE_BOOKS_API_KEY');
+
 class BooksApiService {
   Future<({List<Book> books, String query})> searchBooks(
       String rawOcrText) async {
@@ -27,7 +30,7 @@ class BooksApiService {
 
   Future<List<Book>?> _fetchBooks(String query) async {
     final uri = Uri.parse(
-      '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=5',
+      '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=5&key=$_apiKey',
     );
 
     final response = await http.get(uri);
