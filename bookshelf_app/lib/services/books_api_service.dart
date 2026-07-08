@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
 import '../models/book.dart';
@@ -27,9 +26,8 @@ class BooksApiService {
   }
 
   Future<List<Book>?> _fetchBooks(String query) async {
-    final apiKey = dotenv.env['GOOGLE_BOOKS_API_KEY'] ?? '';
     final uri = Uri.parse(
-      '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=5&key=$apiKey',
+      '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=5',
     );
 
     final response = await http.get(uri);

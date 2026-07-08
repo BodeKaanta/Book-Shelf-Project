@@ -48,9 +48,6 @@ dependencies:
   # Networking
   http: ^1.2.2
 
-  # Environment Variables
-  flutter_dotenv: ^5.2.1
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -62,5 +59,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - .env
