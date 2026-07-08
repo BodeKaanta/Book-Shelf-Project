@@ -122,9 +122,10 @@ Then check the Build Order section to see the current step. The open issues tell
 - Cloud Storage not used in MVP — book cover art is stored as Google Books API URLs in Firestore, no file storage needed. (Screenshot import doesn't change this: screenshots are matched to a Google Books result and only the cover URL is stored.) Revisit in Phase 2 only if we ever need to keep the user's original photo as a fallback cover.
 
 ## API Keys & Secrets
-- **Google Books API calls are made WITHOUT an API key** — the volumes endpoint doesn't require one (PR #48 removed the key and `flutter_dotenv`). Never add a key back to the client: anything bundled in the APK (assets, dart-defines, string constants) is extractable by anyone with a build.
+- **Google Books API key is REQUIRED** — keyless calls return HTTP 429 (Google attributes them to a shared anonymous quota pool that is permanently exhausted; learned the hard way in #48/#50). The key lives in `bookshelf_app/.env` (gitignored) and is injected at build time, not bundled: run with `flutter run --dart-define-from-file=.env`, read in code via `String.fromEnvironment('GOOGLE_BOOKS_API_KEY')`. Debug builds assert the key is present in `main()`.
+- **Honest threat model:** any key shipped in a client app is extractable — dart-define is obfuscation, not protection. The real security control is console-side: in Google Cloud Console, restrict the key to the Books API only and cap its daily quota. Books API is free with no billing attached, so a leaked key can only waste quota — no money or data at risk.
 - The Firebase keys in `firebase_options.dart` / `google-services.json` are identifiers, not secrets — safe to commit. Data access is enforced by Firestore security rules, not by hiding these keys.
-- **Before public launch:** enable Firebase App Check, and add Android package name + SHA-1 restrictions to the Firebase API keys in Google Cloud Console.
+- **Before public launch:** enable Firebase App Check, and add Android package name + SHA-1 restrictions to the Firebase API keys AND the Books API key in Google Cloud Console.
 - Never commit secrets to git. If a real secret is ever needed (paid API, etc.), it belongs behind a Cloud Function — never in the app.
 
 ## POC Status (as of May 2026)

@@ -7,6 +7,10 @@ import 'screens/main_scaffold.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  assert(
+    const String.fromEnvironment('GOOGLE_BOOKS_API_KEY').isNotEmpty,
+    'Missing Google Books API key — run with --dart-define-from-file=.env',
+  );
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   if (FirebaseAuth.instance.currentUser == null) {
