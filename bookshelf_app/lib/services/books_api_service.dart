@@ -2,16 +2,16 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
 import '../models/book.dart';
+import 'book_recognition_service.dart';
 
 // Injected at build time: flutter run --dart-define-from-file=.env
 const _apiKey = String.fromEnvironment('GOOGLE_BOOKS_API_KEY');
 
 class BooksApiService {
-  Future<({List<Book> books, String query})> searchBooks(
-      String rawOcrText) async {
-    if (rawOcrText.trim().isEmpty) return (books: <Book>[], query: '');
+  Future<({List<Book> books, String query})> searchBooks(OcrResult ocr) async {
+    if (ocr.lines.isEmpty) return (books: <Book>[], query: '');
 
-    final query = _buildSearchQuery(rawOcrText);
+    final query = _buildSearchQuery(ocr);
     if (query.isEmpty) return (books: <Book>[], query: '');
 
     // Apply OCR corrections first — fall back to original if corrections break the query
@@ -55,30 +55,44 @@ class BooksApiService {
         );
   }
 
-  String _buildSearchQuery(String rawText) {
-    final lines = rawText
-        .split('\n')
-        .map((l) => l.trim())
-        .where((l) => l.length >= 4)
-        .where((l) => !RegExp(r'^\d[\d:.,\s]*$').hasMatch(l)) // pure numbers
-        .where((l) => !RegExp(r'^\d{1,2}:\d{2}').hasMatch(l)) // timestamps "13:24 A"
-        .where((l) => !_isOcrGarbage(l)) // mixed-case OCR noise like "NoTEB O OK"
-        .where((l) => !_isPromotionalLine(l)) // award/promo text like "LONGLISTED FOR THE"
+  String _buildSearchQuery(OcrResult ocr) {
+    final candidates = ocr.lines
+        .where((l) => l.text.trim().length >= 4)
+        .where((l) => !RegExp(r'^\d[\d:.,\s]*$').hasMatch(l.text.trim())) // pure numbers
+        .where((l) => !RegExp(r'^\d{1,2}:\d{2}').hasMatch(l.text.trim())) // timestamps "13:24 A"
+        .where((l) => !_isOcrGarbage(l.text.trim())) // mixed-case OCR noise like "NoTEB O OK"
+        .where((l) => !_isPromotionalLine(l.text.trim())) // award/promo text
+        .where((l) => !ocr.isScreenshot || !_isSocialUiLine(l.text.trim())) // social UI, screenshots only
         .toList();
 
-    if (lines.isEmpty) {
-      final fallback = rawText.trim();
+    if (candidates.isEmpty) {
+      final fallback = ocr.rawText.trim();
       return fallback.length > 120 ? fallback.substring(0, 120) : fallback;
     }
 
-    lines.sort((a, b) => _lineScore(b).compareTo(_lineScore(a)));
+    final maxLineHeight = candidates
+        .map((l) => l.boundingBox.height)
+        .fold<double>(0, (a, b) => a > b ? a : b);
 
-    final query = lines.take(3).join(' ');
+    candidates.sort((a, b) => _lineScore(b, ocr, maxLineHeight)
+        .compareTo(_lineScore(a, ocr, maxLineHeight)));
+
+    final query = candidates.take(3).map((l) => l.text.trim()).join(' ');
     return query.length > 120 ? query.substring(0, 120) : query;
   }
 
-  // Filters lines where more than 40% of words have suspicious mixed casing
-  // e.g. "NoTEB O OK", "TENZs", "DuK" — hallmarks of OCR misreads
+  // Social-media UI chrome: @handles, #hashtags, engagement counts, known strings.
+  bool _isSocialUiLine(String line) {
+    if (RegExp(r'^[@#]\w').hasMatch(line)) return true;
+    if (RegExp(r'^\d+([.,]\d+)?[KMB]$').hasMatch(line)) return true; // "1.2M", "45K"
+    const uiStrings = [
+      'for you', 'following', 'add comment', 'add a comment', 'reply',
+      'original sound', 'log in', 'sign up', 'send message', 'view profile',
+    ];
+    final lower = line.toLowerCase();
+    return uiStrings.any((s) => lower == s);
+  }
+
   bool _isPromotionalLine(String line) {
     final upper = line.toUpperCase();
     const keywords = [
@@ -89,6 +103,8 @@ class BooksApiService {
     return keywords.any((k) => upper.contains(k));
   }
 
+  // Filters lines where more than 25% of words have suspicious mixed casing
+  // e.g. "NoTEB O OK", "TENZs", "DuK" — hallmarks of OCR misreads
   bool _isOcrGarbage(String line) {
     final words = line.split(' ').where((w) => w.length >= 3).toList();
     if (words.isEmpty) return false;
@@ -114,7 +130,31 @@ class BooksApiService {
             s.substring(1) == s.substring(1).toLowerCase()));
   }
 
-  double _lineScore(String line) {
+  double _lineScore(OcrLine line, OcrResult ocr, double maxLineHeight) {
+    final base = _baseTextScore(line.text.trim());
+    if (!ocr.isScreenshot) return base;
+    return base *
+        _zoneMultiplier(line, ocr.imageHeight) *
+        _sizeMultiplier(line, maxLineHeight);
+  }
+
+  // Penalise TikTok/Instagram nav (top ~15%) and caption (bottom ~30%) zones.
+  double _zoneMultiplier(OcrLine line, int imageHeight) {
+    final box = line.boundingBox;
+    if (imageHeight == 0 || box.height == 0) return 1.0;
+    final center = (box.top + box.bottom) / 2 / imageHeight;
+    if (center < 0.15 || center > 0.70) return 0.4;
+    return 1.0;
+  }
+
+  // Book titles are large display type; usernames/captions are small UI text.
+  double _sizeMultiplier(OcrLine line, double maxLineHeight) {
+    final height = line.boundingBox.height;
+    if (maxLineHeight == 0 || height == 0) return 1.0;
+    return 0.5 + (height / maxLineHeight);
+  }
+
+  double _baseTextScore(String line) {
     // "Title: Author, First:" format — high-value metadata, score above blurb names
     if (line.contains(':')) return 0.85;
 
