@@ -46,10 +46,10 @@ class RecognitionNotifier extends StateNotifier<RecognitionState> {
     );
 
     try {
-      final text = await _recognitionService.extractTextFromImage(image);
-      state = state.copyWith(extractedText: text);
+      final ocr = await _recognitionService.extractTextFromImage(image);
+      state = state.copyWith(extractedText: ocr.rawText);
 
-      final result = await _booksApiService.searchBooks(text);
+      final result = await _booksApiService.searchBooks(ocr);
       state = state.copyWith(
         books: AsyncValue.data(result.books),
         searchQuery: result.query,
