@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
 import '../models/book.dart';
@@ -16,16 +17,21 @@ class BooksApiService {
 
     // Apply OCR corrections first — fall back to original if corrections break the query
     final correctedQuery = _applyOcrCorrections(query);
-    if (correctedQuery != query) {
-      final correctedResult = await _fetchBooks(correctedQuery);
-      if (correctedResult != null) {
-        return (books: correctedResult, query: correctedQuery);
-      }
+    List<Book> books;
+    String usedQuery;
+    final corrected =
+        correctedQuery != query ? await _fetchBooks(correctedQuery) : null;
+    if (corrected != null) {
+      books = corrected;
+      usedQuery = correctedQuery;
+    } else {
+      books = await _fetchBooks(query) ?? <Book>[];
+      usedQuery = query;
     }
 
-    // Use original query (either no corrections needed, or corrections returned nothing)
-    final result = await _fetchBooks(query);
-    return (books: result ?? <Book>[], query: query);
+    // Rescore candidates by how closely each title matches the OCR text —
+    // recovers the right book when the title line was garbled but survived elsewhere
+    return (books: _rerankByFuzzyMatch(books, ocr.lines), query: usedQuery);
   }
 
   Future<List<Book>?> _fetchBooks(String query) async {
@@ -44,6 +50,95 @@ class BooksApiService {
         .whereType<Map<String, dynamic>>()
         .map(Book.fromGoogleBooksJson)
         .toList();
+  }
+
+  // Reorder candidates so the one whose title best matches the OCR text wins.
+  // Only reorders when a genuinely close match exists (>= threshold), otherwise
+  // trusts Google's ranking — keeps clean-photo results stable.
+  static const double _fuzzyMatchThreshold = 0.6;
+
+  List<Book> _rerankByFuzzyMatch(List<Book> books, List<OcrLine> lines) {
+    if (books.length < 2) return books;
+
+    final ocrTokens = lines.expand((l) => _tokens(l.text)).toList();
+    if (ocrTokens.isEmpty) return books;
+
+    final scored = [
+      for (var i = 0; i < books.length; i++)
+        (
+          book: books[i],
+          index: i,
+          score: _candidateMatchScore(books[i], ocrTokens),
+        ),
+    ];
+
+    final best = scored.map((e) => e.score).reduce(max);
+    if (best < _fuzzyMatchThreshold) return books;
+
+    // Stable sort: highest score first, Google's order breaks ties
+    scored.sort((a, b) {
+      final byScore = b.score.compareTo(a.score);
+      return byScore != 0 ? byScore : a.index.compareTo(b.index);
+    });
+    return [for (final e in scored) e.book];
+  }
+
+  double _candidateMatchScore(Book book, List<String> ocrTokens) {
+    final titleScore = _avgBestSimilarity(_tokens(_coreTitle(book.title)), ocrTokens);
+    final authorTokens = book.author == null ? <String>[] : _tokens(book.author!);
+    if (authorTokens.isEmpty) return titleScore;
+    return 0.6 * titleScore + 0.4 * _avgBestSimilarity(authorTokens, ocrTokens);
+  }
+
+  // Drop subtitle (after ':') and edition parentheticals like "(Movie Tie-In)"
+  // so a longer edition title isn't penalised against a bare one
+  String _coreTitle(String title) =>
+      title.split(':').first.replaceAll(RegExp(r'\(.*?\)'), '');
+
+  double _avgBestSimilarity(List<String> targets, List<String> pool) {
+    if (targets.isEmpty) return 0.0;
+    var sum = 0.0;
+    for (final target in targets) {
+      var best = 0.0;
+      for (final candidate in pool) {
+        final similarity = _normalizedSimilarity(target, candidate);
+        if (similarity > best) best = similarity;
+      }
+      sum += best;
+    }
+    return sum / targets.length;
+  }
+
+  List<String> _tokens(String text) => text
+      .toLowerCase()
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((t) => t.length >= 2)
+      .toList();
+
+  double _normalizedSimilarity(String a, String b) {
+    final maxLen = max(a.length, b.length);
+    if (maxLen == 0) return 1.0;
+    return 1.0 - _levenshtein(a, b) / maxLen;
+  }
+
+  int _levenshtein(String a, String b) {
+    if (a == b) return 0;
+    if (a.isEmpty) return b.length;
+    if (b.isEmpty) return a.length;
+
+    var prev = List<int>.generate(b.length + 1, (i) => i);
+    var curr = List<int>.filled(b.length + 1, 0);
+    for (var i = 0; i < a.length; i++) {
+      curr[0] = i + 1;
+      for (var j = 0; j < b.length; j++) {
+        final cost = a[i] == b[j] ? 0 : 1;
+        curr[j + 1] = min(min(curr[j] + 1, prev[j + 1] + 1), prev[j] + cost);
+      }
+      final tmp = prev;
+      prev = curr;
+      curr = tmp;
+    }
+    return prev[b.length];
   }
 
   String _applyOcrCorrections(String query) {
