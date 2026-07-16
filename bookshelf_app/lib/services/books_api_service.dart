@@ -29,6 +29,24 @@ class BooksApiService {
       usedQuery = query;
     }
 
+    // Relax when the search found nothing, OR nothing that matches what we
+    // actually read — a noisy line (web-shop name, junk term) can zero out
+    // results or retrieve confident-but-wrong books. Retrying with just the
+    // leading title words recovers the real book. Only keep the retry if it
+    // matches the OCR better, so relaxation can never make things worse.
+    final ocrTokens = ocr.lines.expand((l) => _tokens(l.text)).toList();
+    if (books.isEmpty || _bestFuzzyScore(books, ocrTokens) < _fuzzyMatchThreshold) {
+      final relaxed = _firstWords(usedQuery, 3);
+      if (relaxed != usedQuery) {
+        final relaxedResult = await _fetchBooks(relaxed) ?? <Book>[];
+        if (_bestFuzzyScore(relaxedResult, ocrTokens) >
+            _bestFuzzyScore(books, ocrTokens)) {
+          books = relaxedResult;
+          usedQuery = relaxed;
+        }
+      }
+    }
+
     // Rescore candidates by how closely each title matches the OCR text —
     // recovers the right book when the title line was garbled but survived elsewhere
     return (books: _rerankByFuzzyMatch(books, ocr.lines), query: usedQuery);
@@ -81,6 +99,11 @@ class BooksApiService {
       return byScore != 0 ? byScore : a.index.compareTo(b.index);
     });
     return [for (final e in scored) e.book];
+  }
+
+  double _bestFuzzyScore(List<Book> books, List<String> ocrTokens) {
+    if (books.isEmpty || ocrTokens.isEmpty) return 0.0;
+    return books.map((b) => _candidateMatchScore(b, ocrTokens)).reduce(max);
   }
 
   double _candidateMatchScore(Book book, List<String> ocrTokens) {
@@ -153,10 +176,14 @@ class BooksApiService {
   String _buildSearchQuery(OcrResult ocr) {
     final candidates = ocr.lines
         .where((l) => l.text.trim().length >= 4)
+        .where((l) => l.text.trim().length <= 40) // drop review blurbs / long quotes
         .where((l) => !RegExp(r'^\d[\d:.,\s]*$').hasMatch(l.text.trim())) // pure numbers
         .where((l) => !RegExp(r'^\d{1,2}:\d{2}').hasMatch(l.text.trim())) // timestamps "13:24 A"
         .where((l) => !_isOcrGarbage(l.text.trim())) // mixed-case OCR noise like "NoTEB O OK"
-        .where((l) => !_isPromotionalLine(l.text.trim())) // award/promo text
+        .where((l) => !_isPromotionalLine(l.text.trim())) // award/promo/bestseller-band text
+        .where((l) => !_isGenericTagline(l.text.trim())) // "A NOVEL", "A MEMOIR"
+        .where((l) => !_isPublisher(l.text.trim())) // publisher name lines like "BLOOMSBURY"
+        .where((l) => !_isAttribution(l.text.trim())) // "— Dallas Morning News"
         .where((l) => !ocr.isScreenshot || !_isSocialUiLine(l.text.trim())) // social UI, screenshots only
         .toList();
 
@@ -172,8 +199,31 @@ class BooksApiService {
     candidates.sort((a, b) => _lineScore(b, ocr, maxLineHeight)
         .compareTo(_lineScore(a, ocr, maxLineHeight)));
 
-    final query = candidates.take(3).map((l) => l.text.trim()).join(' ');
+    final joined = candidates.take(3).map((l) => l.text.trim()).join(' ');
+    final query = _collapseSpacedLetters(joined);
     return query.length > 120 ? query.substring(0, 120) : query;
+  }
+
+  String _firstWords(String query, int n) =>
+      query.split(RegExp(r'\s+')).take(n).join(' ');
+
+  // Cover letter-spacing makes OCR split a word into single letters
+  // ("NoTEB O O K"). Glue standalone letters onto the preceding word so the
+  // title survives as one token ("NoTEBOOK"). Leaves author initials searchable.
+  String _collapseSpacedLetters(String query) {
+    final result = <String>[];
+    for (var token in query.split(RegExp(r'\s+'))) {
+      token = token.replaceFirst(RegExp(r'^[-+]+'), ''); // never send Google an operator
+      if (token.isEmpty) continue;
+      if (token.length == 1 &&
+          RegExp(r'[A-Za-z]').hasMatch(token) &&
+          result.isNotEmpty) {
+        result[result.length - 1] += token;
+      } else {
+        result.add(token);
+      }
+    }
+    return result.join(' ');
   }
 
   // Social-media UI chrome: @handles, #hashtags, engagement counts, known strings.
@@ -188,12 +238,39 @@ class BooksApiService {
     return uiStrings.any((s) => lower == s);
   }
 
+  // Strip to letters only so OCR word-splitting ("BLOO M S BURY", "A NO VEL")
+  // still matches its true form ("bloomsbury", "anovel")
+  String _normalize(String line) =>
+      line.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+
+  // Generic cover taglines — never useful as search terms, and when they read
+  // as short all-caps ("A NOVEL") they otherwise score max and hijack the query
+  bool _isGenericTagline(String line) {
+    const taglines = {'anovel', 'anovelby', 'amemoir', 'anovella', 'atruestory'};
+    return taglines.contains(_normalize(line));
+  }
+
+  // Review-source attributions ("— Dallas Morning News", "- Sunday Times") —
+  // pure noise, and the leading dash is a Google Books negation operator
+  bool _isAttribution(String line) => RegExp(r'^\s*[-–—]').hasMatch(line);
+
+  // Publisher name lines — a whole line that is just the publisher is noise
+  bool _isPublisher(String line) {
+    const publishers = {
+      'bloomsbury', 'penguin', 'penguinbooks', 'penguinrandomhouse', 'vintagebooks',
+      'harpercollins', 'randomhouse', 'macmillan', 'panmacmillan', 'simonschuster',
+      'hachette', 'faberandfaber', 'doubleday', 'scholastic', 'picador', 'littlebrown',
+    };
+    return publishers.contains(_normalize(line));
+  }
+
   bool _isPromotionalLine(String line) {
     final upper = line.toUpperCase();
     const keywords = [
       'LONGLISTED', 'SHORTLISTED', 'PRIZE', 'AWARD', 'WINNER',
       'BESTSELLER', 'BESTSELLING', 'FINALIST', 'BOOKER', 'PULITZER',
-      'INTRODUCTION',
+      'INTRODUCTION', 'NEW YORK TIMES', 'SUNDAY TIMES', 'BEST SELLER',
+      'NATIONAL BESTSELLER',
     ];
     return keywords.any((k) => upper.contains(k));
   }
