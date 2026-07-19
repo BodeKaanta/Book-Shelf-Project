@@ -204,6 +204,7 @@ class BooksApiService {
         .where((l) => !_isGenericTagline(l.text.trim())) // "A NOVEL", "A MEMOIR"
         .where((l) => !_isPublisher(l.text.trim())) // publisher name lines like "BLOOMSBURY"
         .where((l) => !_isAttribution(l.text.trim())) // "— Dallas Morning News"
+        .where((l) => !_isEditionInfo(l.text.trim())) // "10th Anniversary Edition", "Book 2 of"
         .where((l) => !ocr.isScreenshot || !_isSocialUiLine(l.text.trim())) // social UI, screenshots only
         .toList();
 
@@ -274,6 +275,19 @@ class BooksApiService {
   // pure noise, and the leading dash is a Google Books negation operator
   bool _isAttribution(String line) => RegExp(r'^\s*[-–—]').hasMatch(line);
 
+  // Edition/series banner text ("10th Anniversary Edition", "Book 2 of the …",
+  // "Volume 3") — never a search term. Kept narrow (needs an edition keyword or
+  // a number) so real titles like "Book of the Dead" aren't dropped.
+  bool _isEditionInfo(String line) {
+    final upper = line.toUpperCase();
+    return upper.contains('ANNIVERSARY EDITION') ||
+        RegExp(r'\b\d+(ST|ND|RD|TH)\s+ANNIVERSARY\b').hasMatch(upper) ||
+        RegExp(r'\b(DELUXE|SPECIAL|COLLECTOR.?S|REVISED|EXPANDED|ILLUSTRATED)\s+EDITION\b')
+            .hasMatch(upper) ||
+        RegExp(r'\bBOOK\s+\d+\s+OF\b').hasMatch(upper) ||
+        RegExp(r'\bVOL(?:UME|\.)?\s*\d+\b').hasMatch(upper);
+  }
+
   // Publisher name lines — a whole line that is just the publisher is noise
   bool _isPublisher(String line) {
     const publishers = {
@@ -291,6 +305,8 @@ class BooksApiService {
       'BESTSELLER', 'BESTSELLING', 'FINALIST', 'BOOKER', 'PULITZER',
       'INTRODUCTION', 'NEW YORK TIMES', 'SUNDAY TIMES', 'BEST SELLER',
       'NATIONAL BESTSELLER',
+      // Film/TV adaptation banners
+      'MOTION PICTURE', 'MAJOR MOTION', 'NETFLIX', 'SOON TO BE', 'NOW A MAJOR',
     ];
     return keywords.any((k) => upper.contains(k));
   }
