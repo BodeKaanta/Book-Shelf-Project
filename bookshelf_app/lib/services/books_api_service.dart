@@ -9,11 +9,12 @@ import 'book_recognition_service.dart';
 const _apiKey = String.fromEnvironment('GOOGLE_BOOKS_API_KEY');
 
 class BooksApiService {
-  Future<({List<Book> books, String query})> searchBooks(OcrResult ocr) async {
-    if (ocr.lines.isEmpty) return (books: <Book>[], query: '');
+  Future<({List<Book> books, String query, double confidence})> searchBooks(
+      OcrResult ocr) async {
+    if (ocr.lines.isEmpty) return (books: <Book>[], query: '', confidence: 0.0);
 
     final query = _buildSearchQuery(ocr);
-    if (query.isEmpty) return (books: <Book>[], query: '');
+    if (query.isEmpty) return (books: <Book>[], query: '', confidence: 0.0);
 
     // Apply OCR corrections first — fall back to original if corrections break the query
     final correctedQuery = _applyOcrCorrections(query);
@@ -49,7 +50,26 @@ class BooksApiService {
 
     // Rescore candidates by how closely each title matches the OCR text —
     // recovers the right book when the title line was garbled but survived elsewhere
-    return (books: _rerankByFuzzyMatch(books, ocr.lines), query: usedQuery);
+    final reranked = _rerankByFuzzyMatch(books, ocr.lines);
+    return (
+      books: reranked,
+      query: usedQuery,
+      confidence: _confidence(reranked, ocrTokens),
+    );
+  }
+
+  // 0..1 confidence that the top result is the right book: how well it matches
+  // the OCR, plus how clearly it beats the runner-up (a common title with many
+  // near-equal editions is ambiguous -> lower confidence -> should be reviewed).
+  // HOMEMADE HEURISTIC — the auto-add threshold is meaningless until calibrated
+  // against real photos (#42).
+  double _confidence(List<Book> books, List<String> ocrTokens) {
+    if (books.isEmpty || ocrTokens.isEmpty) return 0.0;
+    final top = _candidateMatchScore(books.first, ocrTokens);
+    final second =
+        books.length > 1 ? _candidateMatchScore(books[1], ocrTokens) : 0.0;
+    final margin = (top - second).clamp(0.0, 1.0);
+    return (0.7 * top + 0.3 * margin).clamp(0.0, 1.0);
   }
 
   Future<List<Book>?> _fetchBooks(String query) async {

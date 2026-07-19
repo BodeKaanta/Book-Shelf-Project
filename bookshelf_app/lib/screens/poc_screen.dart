@@ -63,8 +63,8 @@ class _PocScreenState extends ConsumerState<PocScreen> {
               const SizedBox(height: 16),
             ],
             state.books.when(
-              data: (books) =>
-                  _buildResults(books, state.extractedText, state.searchQuery),
+              data: (books) => _buildResults(
+                  books, state.extractedText, state.searchQuery, state.confidence),
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Text(
                 'Error: $e',
@@ -77,8 +77,8 @@ class _PocScreenState extends ConsumerState<PocScreen> {
     );
   }
 
-  Widget _buildResults(
-      List<Book> books, String extractedText, String searchQuery) {
+  Widget _buildResults(List<Book> books, String extractedText,
+      String searchQuery, double confidence) {
     if (extractedText.isEmpty) return const SizedBox.shrink();
 
     return Column(
@@ -128,6 +128,15 @@ class _PocScreenState extends ConsumerState<PocScreen> {
           const SizedBox(height: 8),
         ],
         const Divider(height: 24),
+        Text(
+          'Confidence: ${(confidence * 100).toStringAsFixed(0)}%',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: confidence >= 0.8 ? Colors.green : Colors.orange,
+          ),
+        ),
+        const SizedBox(height: 8),
         const Text(
           'Query sent to Books API (debug)',
           style: TextStyle(fontSize: 12, color: Colors.grey),

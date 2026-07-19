@@ -11,22 +11,26 @@ class RecognitionState {
   final AsyncValue<List<Book>> books;
   final String extractedText;
   final String searchQuery;
+  final double confidence;
 
   const RecognitionState({
     this.books = const AsyncValue.data([]),
     this.extractedText = '',
     this.searchQuery = '',
+    this.confidence = 0.0,
   });
 
   RecognitionState copyWith({
     AsyncValue<List<Book>>? books,
     String? extractedText,
     String? searchQuery,
+    double? confidence,
   }) {
     return RecognitionState(
       books: books ?? this.books,
       extractedText: extractedText ?? this.extractedText,
       searchQuery: searchQuery ?? this.searchQuery,
+      confidence: confidence ?? this.confidence,
     );
   }
 }
@@ -43,6 +47,7 @@ class RecognitionNotifier extends StateNotifier<RecognitionState> {
       books: const AsyncValue.loading(),
       extractedText: '',
       searchQuery: '',
+      confidence: 0.0,
     );
 
     try {
@@ -53,6 +58,7 @@ class RecognitionNotifier extends StateNotifier<RecognitionState> {
       state = state.copyWith(
         books: AsyncValue.data(result.books),
         searchQuery: result.query,
+        confidence: result.confidence,
       );
     } catch (e, st) {
       state = state.copyWith(books: AsyncValue.error(e, st));
