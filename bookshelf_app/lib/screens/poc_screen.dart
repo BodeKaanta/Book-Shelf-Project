@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/book.dart';
+import '../providers/import_provider.dart';
 import '../providers/recognition_provider.dart';
 
 class PocScreen extends ConsumerStatefulWidget {
@@ -24,6 +25,12 @@ class _PocScreenState extends ConsumerState<PocScreen> {
     await ref.read(recognitionProvider.notifier).recognizeFromImage(image);
   }
 
+  Future<void> _batchImport() async {
+    final images = await _picker.pickMultiImage();
+    if (images.isEmpty) return;
+    await ref.read(importProvider.notifier).importImages(images);
+  }
+
   Future<void> _saveBook(Book book) async {
     setState(() => _saving = true);
     final saved = await ref.read(recognitionProvider.notifier).saveBook(book);
@@ -37,6 +44,7 @@ class _PocScreenState extends ConsumerState<PocScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(recognitionProvider);
+    final importState = ref.watch(importProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Bookedex — Recognition POC')),
@@ -49,6 +57,12 @@ class _PocScreenState extends ConsumerState<PocScreen> {
               onPressed: _pickImage,
               icon: const Icon(Icons.photo_library),
               label: const Text('Pick Photo from Gallery'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _batchImport,
+              icon: const Icon(Icons.library_add),
+              label: const Text('Batch Import (dev)'),
             ),
             const SizedBox(height: 16),
             if (_selectedImage != null) ...[
@@ -71,9 +85,51 @@ class _PocScreenState extends ConsumerState<PocScreen> {
                 style: const TextStyle(color: Colors.red),
               ),
             ),
+            if (importState.importing)
+              const Padding(
+                padding: EdgeInsets.only(top: 16),
+                child: Row(children: [
+                  SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 8),
+                  Text('Importing…'),
+                ]),
+              ),
+            if (!importState.importing &&
+                (importState.addedCount > 0 || importState.reviewCount > 0))
+              _buildImportSummary(importState),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildImportSummary(ImportState s) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 24),
+        Text(
+          'Batch import: ${s.addedCount} auto-added · ${s.reviewCount} to review',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        const SizedBox(height: 8),
+        if (s.autoAdded.isNotEmpty) ...[
+          const Text('Auto-added (≥75%)',
+              style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+          ...s.autoAdded.map((a) => Text(
+              '• ${a.book.title}${a.book.author != null ? ' — ${a.book.author}' : ''}')),
+          const SizedBox(height: 8),
+        ],
+        if (s.queue.isNotEmpty) ...[
+          const Text('To review (<75%)',
+              style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+          ...s.queue.map((p) => Text(
+              '• ${(p.confidence * 100).toStringAsFixed(0)}% — ${p.topGuess?.title ?? '(no match)'}')),
+        ],
+      ],
     );
   }
 

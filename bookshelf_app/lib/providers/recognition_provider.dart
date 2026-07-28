@@ -66,7 +66,8 @@ class RecognitionNotifier extends StateNotifier<RecognitionState> {
   }
 
   Future<bool> saveBook(Book book) async {
-    return await _ref.read(bookRepositoryProvider).addBook(book);
+    final id = await _ref.read(bookRepositoryProvider).addBook(book);
+    return id != null;
   }
 }
 
