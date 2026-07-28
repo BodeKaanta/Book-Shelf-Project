@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/book.dart';
 import '../providers/import_provider.dart';
 import '../providers/recognition_provider.dart';
+import 'approval_screen.dart';
 
 class PocScreen extends ConsumerStatefulWidget {
   const PocScreen({super.key});
@@ -128,6 +129,14 @@ class _PocScreenState extends ConsumerState<PocScreen> {
               style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
           ...s.queue.map((p) => Text(
               '• ${(p.confidence * 100).toStringAsFixed(0)}% — ${p.topGuess?.title ?? '(no match)'}')),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ApprovalScreen()),
+            ),
+            icon: const Icon(Icons.rate_review),
+            label: const Text('Open Review Queue (dev)'),
+          ),
         ],
       ],
     );
