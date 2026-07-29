@@ -4,93 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/book.dart';
 import '../models/pending_book.dart';
 import '../providers/import_provider.dart';
+import 'manual_search_screen.dart';
 
-class ApprovalScreen extends ConsumerStatefulWidget {
+class ApprovalScreen extends ConsumerWidget {
   const ApprovalScreen({super.key});
 
   @override
-  ConsumerState<ApprovalScreen> createState() => _ApprovalScreenState();
-}
-
-class _ApprovalScreenState extends ConsumerState<ApprovalScreen>
-    with SingleTickerProviderStateMixin {
-  bool _showOtherMatches = false;
-  // A ValueNotifier (not setState) so only the card's transform rebuilds while
-  // dragging — the image, pills, and the rest of the screen stay put.
-  final ValueNotifier<Offset> _drag = ValueNotifier(Offset.zero);
-  late final AnimationController _controller;
-
-  static const double _swipeThreshold = 100;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 250));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _drag.dispose();
-    super.dispose();
-  }
-
-  // Animate the card from its current position to [target]; run [onDone] when
-  // it arrives. Used for both fly-out (off-screen) and spring-back (to center).
-  void _animateTo(Offset target, {VoidCallback? onDone}) {
-    final anim = Tween<Offset>(begin: _drag.value, end: target)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
-    void listener() => _drag.value = anim.value;
-    anim.addListener(listener);
-    _controller
-      ..reset()
-      ..forward().whenComplete(() {
-        anim.removeListener(listener);
-        onDone?.call();
-      });
-  }
-
-  // Fly the card off-screen in [direction], apply [action], then reset for the
-  // next card.
-  void _commit(Offset direction, VoidCallback action) {
-    final size = MediaQuery.of(context).size;
-    _animateTo(direction.scale(size.width, size.height), onDone: () {
-      action();
-      _drag.value = Offset.zero;
-      setState(() => _showOtherMatches = false);
-    });
-  }
-
-  void _approve(Book book) =>
-      _commit(const Offset(1.5, 0), () => ref.read(importProvider.notifier).approveTop(book));
-
-  void _reject() =>
-      _commit(const Offset(-1.5, 0), () => ref.read(importProvider.notifier).rejectTop());
-
-  void _manualSearch() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Manual search — coming next (#44)')),
-    );
-    _animateTo(Offset.zero); // spring back; manual search doesn't discard
-  }
-
-  void _onDragEnd(PendingBook pending) {
-    final drag = _drag.value;
-    if (drag.dx > _swipeThreshold && pending.hasResults) {
-      _approve(pending.topGuess!);
-    } else if (drag.dx < -_swipeThreshold) {
-      _reject();
-    } else if (drag.dy < -_swipeThreshold) {
-      _manualSearch();
-    } else {
-      _animateTo(Offset.zero); // didn't reach threshold — spring back
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final queue = ref.watch(importProvider.select((s) => s.queue));
+    final notifier = ref.read(importProvider.notifier);
 
     return Scaffold(
       appBar: AppBar(
@@ -102,11 +24,37 @@ class _ApprovalScreenState extends ConsumerState<ApprovalScreen>
         ),
         title: const Text('Review Match'),
         centerTitle: true,
+        actions: [
+          if (queue.isNotEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Text('${queue.length} to review',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+              ),
+            ),
+        ],
       ),
       body: queue.isEmpty
           ? _buildComplete(context)
-          : _buildReview(context, queue.first),
+          : _ReviewCard(
+              // Keyed by the photo so advancing the queue mounts a fresh card
+              // (no shared drag offset to snap back — fixes the flash).
+              key: ValueKey(queue.first.imagePath),
+              pending: queue.first,
+              onApprove: notifier.approveTop,
+              onReject: notifier.rejectTop,
+              onManualSearch: () => _manualSearch(context, notifier),
+            ),
     );
+  }
+
+  Future<void> _manualSearch(
+      BuildContext context, ImportNotifier notifier) async {
+    final book = await Navigator.of(context).push<Book>(
+      MaterialPageRoute(builder: (_) => const ManualSearchScreen()),
+    );
+    if (book != null) notifier.approveTop(book);
   }
 
   Widget _buildComplete(BuildContext context) {
@@ -129,8 +77,94 @@ class _ApprovalScreenState extends ConsumerState<ApprovalScreen>
       ),
     );
   }
+}
 
-  Widget _buildReview(BuildContext context, PendingBook pending) {
+class _ReviewCard extends StatefulWidget {
+  final PendingBook pending;
+  final void Function(Book) onApprove;
+  final VoidCallback onReject;
+  final VoidCallback onManualSearch;
+
+  const _ReviewCard({
+    super.key,
+    required this.pending,
+    required this.onApprove,
+    required this.onReject,
+    required this.onManualSearch,
+  });
+
+  @override
+  State<_ReviewCard> createState() => _ReviewCardState();
+}
+
+class _ReviewCardState extends State<_ReviewCard>
+    with SingleTickerProviderStateMixin {
+  bool _showOtherMatches = false;
+  final ValueNotifier<Offset> _drag = ValueNotifier(Offset.zero);
+  late final AnimationController _controller;
+
+  static const double _swipeThreshold = 100;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 250));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _drag.dispose();
+    super.dispose();
+  }
+
+  void _animateTo(Offset target, {VoidCallback? onDone}) {
+    final anim = Tween<Offset>(begin: _drag.value, end: target)
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    void listener() => _drag.value = anim.value;
+    anim.addListener(listener);
+    _controller
+      ..reset()
+      ..forward().whenComplete(() {
+        anim.removeListener(listener);
+        onDone?.call();
+      });
+  }
+
+  // Fly off-screen, then hand control back to the parent, which advances the
+  // queue and disposes this card — so there's nothing left to snap back.
+  void _flyOut(Offset direction, VoidCallback action) {
+    final size = MediaQuery.of(context).size;
+    _animateTo(direction.scale(size.width, size.height), onDone: action);
+  }
+
+  void _approve(Book book) =>
+      _flyOut(const Offset(1.5, 0), () => widget.onApprove(book));
+
+  void _reject() => _flyOut(const Offset(-1.5, 0), widget.onReject);
+
+  void _manualSearch() {
+    _animateTo(Offset.zero); // spring back — parent handles the search screen
+    widget.onManualSearch();
+  }
+
+  void _onDragEnd() {
+    final drag = _drag.value;
+    if (drag.dx > _swipeThreshold && widget.pending.hasResults) {
+      _approve(widget.pending.topGuess!);
+    } else if (drag.dx < -_swipeThreshold) {
+      _reject();
+    } else if (drag.dy < -_swipeThreshold) {
+      _manualSearch();
+    } else {
+      _animateTo(Offset.zero); // below threshold — spring back
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = widget.pending;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -139,10 +173,10 @@ class _ApprovalScreenState extends ConsumerState<ApprovalScreen>
             Expanded(
               child: GestureDetector(
                 onPanUpdate: (d) => _drag.value += d.delta,
-                onPanEnd: (_) => _onDragEnd(pending),
+                onPanEnd: (_) => _onDragEnd(),
                 child: ValueListenableBuilder<Offset>(
                   valueListenable: _drag,
-                  child: _reviewCard(pending),
+                  child: _card(pending),
                   builder: (context, drag, child) {
                     return Transform.translate(
                       offset: drag,
@@ -189,7 +223,7 @@ class _ApprovalScreenState extends ConsumerState<ApprovalScreen>
     );
   }
 
-  Widget _reviewCard(PendingBook pending) {
+  Widget _card(PendingBook pending) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: Stack(
@@ -225,7 +259,6 @@ class _ApprovalScreenState extends ConsumerState<ApprovalScreen>
     );
   }
 
-  // A ✓ / ✗ / search stamp that fades in with the drag so the action is visible.
   Widget _dragStamp(Offset drag) {
     final right = (drag.dx / _swipeThreshold).clamp(0.0, 1.0);
     final left = (-drag.dx / _swipeThreshold).clamp(0.0, 1.0);

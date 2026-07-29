@@ -72,9 +72,17 @@ class BooksApiService {
     return (0.7 * top + 0.3 * margin).clamp(0.0, 1.0);
   }
 
-  Future<List<Book>?> _fetchBooks(String query) async {
+  // Free-text search for the manual search screen — no OCR scoring, just what
+  // the user typed.
+  Future<List<Book>> searchByText(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return <Book>[];
+    return await _fetchBooks(trimmed, 10) ?? <Book>[];
+  }
+
+  Future<List<Book>?> _fetchBooks(String query, [int maxResults = 5]) async {
     final uri = Uri.parse(
-      '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=5&key=$_apiKey',
+      '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=$maxResults&key=$_apiKey',
     );
 
     final response = await http.get(uri);
