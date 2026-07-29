@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'capture_screen.dart';
 import 'home_screen.dart';
 import 'import_screen.dart';
 import 'placeholder_screen.dart';
@@ -16,7 +17,7 @@ class _MainScaffoldState extends State<MainScaffold> {
   final List<Widget> _screens = const [
     HomeScreen(),
     PlaceholderScreen(label: 'Search'),
-    PlaceholderScreen(label: 'Capture'),
+    CaptureScreen(),
     ImportScreen(),
     PlaceholderScreen(label: 'Discover'),
   ];

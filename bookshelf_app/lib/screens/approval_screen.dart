@@ -42,7 +42,7 @@ class ApprovalScreen extends ConsumerWidget {
               // (no shared drag offset to snap back — fixes the flash).
               key: ValueKey(queue.first.imagePath),
               pending: queue.first,
-              onApprove: notifier.approveTop,
+              onApprove: (book) => _approve(context, notifier, book),
               onReject: notifier.rejectTop,
               onManualSearch: () => _manualSearch(context, notifier),
             ),
@@ -54,7 +54,17 @@ class ApprovalScreen extends ConsumerWidget {
     final book = await Navigator.of(context).push<Book>(
       MaterialPageRoute(builder: (_) => const ManualSearchScreen()),
     );
-    if (book != null) notifier.approveTop(book);
+    if (book != null && context.mounted) _approve(context, notifier, book);
+  }
+
+  Future<void> _approve(
+      BuildContext context, ImportNotifier notifier, Book book) async {
+    final added = await notifier.approveTop(book);
+    if (!added && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"${book.title}" is already in your library.')),
+      );
+    }
   }
 
   Widget _buildComplete(BuildContext context) {
