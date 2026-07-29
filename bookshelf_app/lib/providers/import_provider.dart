@@ -20,6 +20,7 @@ class ImportState {
   final bool importing;
   final int processed; // photos routed so far this import
   final int total; // photos in the current import
+  final int alreadyInLibrary; // confident matches skipped as duplicates
 
   const ImportState({
     this.queue = const [],
@@ -27,6 +28,7 @@ class ImportState {
     this.importing = false,
     this.processed = 0,
     this.total = 0,
+    this.alreadyInLibrary = 0,
   });
 
   int get addedCount => autoAdded.length;
@@ -38,6 +40,7 @@ class ImportState {
     bool? importing,
     int? processed,
     int? total,
+    int? alreadyInLibrary,
   }) {
     return ImportState(
       queue: queue ?? this.queue,
@@ -45,6 +48,7 @@ class ImportState {
       importing: importing ?? this.importing,
       processed: processed ?? this.processed,
       total: total ?? this.total,
+      alreadyInLibrary: alreadyInLibrary ?? this.alreadyInLibrary,
     );
   }
 }
@@ -60,28 +64,32 @@ class ImportNotifier extends StateNotifier<ImportState> {
 
   Future<void> importImages(List<XFile> images) async {
     state = ImportState(importing: true, total: images.length);
+    final confident = <Book>[];
     for (final image in images) {
-      await _route(image);
+      final match = await _classify(image);
+      if (match != null) confident.add(match);
       state = state.copyWith(processed: state.processed + 1);
+      await Future<void>.delayed(Duration.zero); // yield so the UI can render
     }
-    state = state.copyWith(importing: false);
+    // One batched write for all confident matches — no per-book Firestore write
+    // (and no per-book Home rebuild) during the loading loop.
+    final result = await _repo.addBooks(confident);
+    state = state.copyWith(
+      importing: false,
+      autoAdded: [for (final e in result.added) AutoAdded(e.id, e.book)],
+      alreadyInLibrary: result.duplicates,
+    );
   }
 
-  Future<void> _route(XFile image) async {
+  // Returns the confident top match to auto-add, or null after enqueuing an
+  // uncertain photo for review. Does not write to the library.
+  Future<Book?> _classify(XFile image) async {
     final ocr = await _recognition.extractTextFromImage(image);
     final result = await _booksApi.searchBooks(ocr);
 
-    final confident = result.confidence >= autoAddConfidenceThreshold &&
+    final isConfident = result.confidence >= autoAddConfidenceThreshold &&
         result.books.isNotEmpty;
-    if (confident) {
-      final id = await _repo.addBook(result.books.first);
-      if (id != null) {
-        state = state.copyWith(
-          autoAdded: [...state.autoAdded, AutoAdded(id, result.books.first)],
-        );
-      }
-      return; // duplicate (id == null) is silently skipped — already in library
-    }
+    if (isConfident) return result.books.first;
 
     final queue = [
       ...state.queue,
@@ -92,13 +100,16 @@ class ImportNotifier extends StateNotifier<ImportState> {
       ),
     ]..sort((a, b) => b.confidence.compareTo(a.confidence));
     state = state.copyWith(queue: queue);
+    return null;
   }
 
   // Approve the current card with the chosen book (top guess, another match, or
-  // a manual-search pick), save it, and advance the queue.
-  Future<void> approveTop(Book book) async {
-    await _repo.addBook(book);
+  // a manual-search pick), save it, and advance the queue. Returns false if the
+  // book was already in the library (nothing added).
+  Future<bool> approveTop(Book book) async {
+    final id = await _repo.addBook(book);
     _dropTop();
+    return id != null;
   }
 
   // Skip the current card without saving, and advance the queue.

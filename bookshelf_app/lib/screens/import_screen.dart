@@ -67,24 +67,31 @@ class ImportScreen extends ConsumerWidget {
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
-    final images = await ImagePicker().pickMultiImage();
+    // Downscale natively at pick time — ML Kit on a ~2000px image instead of a
+    // full 12MP photo is far lighter and keeps the UI responsive. Cover text
+    // stays legible at this size.
+    final images = await ImagePicker().pickMultiImage(
+      maxWidth: 2000,
+      maxHeight: 2000,
+      imageQuality: 90,
+    );
     if (images.isEmpty) return;
 
     await ref.read(importProvider.notifier).importImages(images);
     if (!context.mounted) return;
 
     final s = ref.read(importProvider);
-    await _showSummary(context, s.addedCount, s.reviewCount);
+    await _showSummary(context, s.addedCount, s.alreadyInLibrary, s.reviewCount);
   }
 
   Future<void> _showSummary(
-      BuildContext context, int added, int review) async {
+      BuildContext context, int added, int already, int review) async {
     final review0 = review == 0;
     final goReview = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Import complete'),
-        content: Text(_summaryText(added, review)),
+        content: Text(_summaryText(added, already, review)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -106,14 +113,18 @@ class ImportScreen extends ConsumerWidget {
     }
   }
 
-  String _summaryText(int added, int review) {
-    if (added == 0 && review == 0) {
-      return 'These books are already in your library.';
+  String _summaryText(int added, int already, int review) {
+    final lines = <String>[];
+    if (added > 0) {
+      lines.add('$added ${added == 1 ? 'book' : 'books'} added to your library.');
     }
-    final addedLine =
-        '$added ${added == 1 ? 'book' : 'books'} added to your library.';
-    if (review == 0) return addedLine;
-    return '$addedLine\n'
-        '$review ${review == 1 ? 'book needs' : 'books need'} review.';
+    if (already > 0) {
+      lines.add(
+          '$already ${already == 1 ? 'book was' : 'books were'} already in your library.');
+    }
+    if (review > 0) {
+      lines.add('$review ${review == 1 ? 'book needs' : 'books need'} review.');
+    }
+    return lines.isEmpty ? 'Nothing to import.' : lines.join('\n');
   }
 }
