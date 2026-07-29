@@ -67,6 +67,8 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 6a. ✅ Camera capture (#67) — Capture tab takes a single photo (`ImageSource.camera`) → the same `importImages` routing → auto-add (snackbar + Undo), open the approval card, or "already in library".
 
 **Import resolution strategy (perf):** batch import downscales at pick time (`maxWidth/maxHeight: 2000`) so ML Kit isn't chewing 12MP photos per book — a per-book hiccup on a busy import reads as jank (matters for the influencer demo) and even blocked tab-switching at full res. Camera capture stays **full resolution** on purpose: it's a single image, so the OCR cost is a one-time wait, not a repeating hiccup, and full res gives the best recognition (e.g. thin/vertical cover text like *Authority*, which fails when downscaled). The proper fix to remove the residual batch hiccup entirely is background processing (#66) — OCR can't be moved off the main isolate with this plugin.
+
+**Import writes + dedup:** confident auto-adds are collected during the loop and written in **one `WriteBatch` after the loop** (not per book) — avoids N Firestore writes + N Home rebuilds mid-import. Duplicate detection matches on **title + author** (not just `googleBooksId`), so two captures of the same book that resolve to different Google Books editions don't both get added. Duplicates on the swipe/manual-search path show an "already in your library" snackbar; the import summary shows an "N already in your library" line.
 7. Book detail sidebar ← **NEXT**
 8. Basic shelves and manual tags
 9. Mood quiz → ONE recommendation flow
@@ -192,8 +194,11 @@ Tinder-style swipe review card, only shown for books the system is uncertain abo
 
 **Step 6 issues — all merged:** #41 confidence score · #42 routing · #43 swipe card · #44 manual search · #45 Import wiring + summary popup (+ deleted `poc_screen.dart`).
 
-**Fast-follow ideas (not yet created):**
-- Option B import UX — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the current blocking loader.
+**Follow-ups filed as issues:**
+- **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
+- **#68 (step 6b — cascading card stack)** — show the next queued cards staggered behind the current review card (Pokémon TCG Pocket-style); shows queue depth AND pre-renders the next card's image to kill the between-card pause. Also tracks a small import-transition flash (Import start screen shows for a frame before the loader).
+
+**Ideas not yet created:**
 - Edition-picker / custom cover — let the user choose among a book's Google Books editions so the cover matches their physical copy (no storage needed); true custom-photo covers need Cloud Storage = Phase 2.
 - `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain.
 - Full "delight" import loading animation/game — Phase 2 polish.
@@ -207,9 +212,9 @@ bookshelf_app/lib/
 ├── models/pending_book.dart         — PendingBook: one queued review card (imagePath, candidates, confidence; topGuess/otherMatches/hasResults)
 ├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult (per-line text + bounding box + imageHeight + isScreenshot)
 ├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText (free-text for manual search)
-├── services/book_repository.dart    — BookRepository: addBook (returns new doc id, null if duplicate), deleteBook, watchBooks
-├── providers/recognition_provider.dart     — bookRepositoryProvider (+ RecognitionNotifier, pending the Capture/camera flow)
-├── providers/import_provider.dart   — ImportNotifier: importImages routing, approval queue, autoAdded list, undoAutoAdd/approveTop/rejectTop, addedCount/reviewCount/progress
+├── services/book_repository.dart    — BookRepository: addBook (returns doc id, null if dup), addBooks (one WriteBatch for import), deleteBook, watchBooks. Dedup = same googleBooksId OR same title+author (catches different Google Books editions)
+├── providers/recognition_provider.dart     — bookRepositoryProvider (+ RecognitionNotifier, now unused — kept in case the camera flow ever wants a single-photo notifier)
+├── providers/import_provider.dart   — ImportNotifier: importImages routing (collects confident matches → one batched addBooks after the loop), approval queue, autoAdded list, undoAutoAdd/approveTop/rejectTop, addedCount/alreadyInLibrary/reviewCount/progress
 ├── providers/books_provider.dart    — booksStreamProvider: StreamProvider<List<Book>> wrapping watchBooks()
 ├── screens/main_scaffold.dart       — 5-tab NavigationBar shell (Home, Search, Capture, Import, Discover) + IndexedStack
 ├── screens/home_screen.dart         — Home screen: Netflix-style rows (Your Library + genre rows) + hamburger drawer
@@ -218,7 +223,7 @@ bookshelf_app/lib/
 ├── screens/import_screen.dart       — Import tab: Choose Photos → routing (progress) → summary popup → review queue
 ├── screens/approval_screen.dart     — Tinder swipe review card (keyed _ReviewCard: drag/animations, see-other-matches, no-OCR/complete states)
 ├── screens/manual_search_screen.dart — debounced live Google Books search, returns the picked Book
-└── screens/placeholder_screen.dart  — Reusable placeholder for Search, Capture, Discover tabs
+└── screens/placeholder_screen.dart  — Reusable placeholder for the Search and Discover tabs (Home/Capture/Import are real)
 ```
 
 ## Roadmap
