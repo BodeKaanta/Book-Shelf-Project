@@ -69,7 +69,8 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 **Import resolution strategy (perf):** batch import downscales at pick time (`maxWidth/maxHeight: 2000`) so ML Kit isn't chewing 12MP photos per book — a per-book hiccup on a busy import reads as jank (matters for the influencer demo) and even blocked tab-switching at full res. Camera capture stays **full resolution** on purpose: it's a single image, so the OCR cost is a one-time wait, not a repeating hiccup, and full res gives the best recognition (e.g. thin/vertical cover text like *Authority*, which fails when downscaled). The proper fix to remove the residual batch hiccup entirely is background processing (#66) — OCR can't be moved off the main isolate with this plugin.
 
 **Import writes + dedup:** confident auto-adds are collected during the loop and written in **one `WriteBatch` after the loop** (not per book) — avoids N Firestore writes + N Home rebuilds mid-import. Duplicate detection matches on **title + author** (not just `googleBooksId`), so two captures of the same book that resolve to different Google Books editions don't both get added. Duplicates on the swipe/manual-search path show an "already in your library" snackbar; the import summary shows an "N already in your library" line.
-7. Book detail sidebar ← **NEXT**
+6b. Cascading card stack on the review screen (#68) ← **NEXT** — staggered next cards behind the current one (pre-renders the next card's image to remove the between-card pause), plus fix the brief Import-start-screen flash before the loader.
+7. Book detail sidebar
 8. Basic shelves and manual tags
 9. Mood quiz → ONE recommendation flow
 10. In-app housekeeping prompts
