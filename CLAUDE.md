@@ -60,11 +60,11 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 ## Build Order — Follow This Sequence
 1. ✅ Flutter project + Firebase connected + running on physical Android device
 2. ✅ **Proof of concept only:** photo → ML Kit OCR → Google Books API → display result (no DB, no UI polish)
-3. ✅ Accuracy test (initial pass): 9 of 12 tested clean photos correct (75%) — query builder iteration done. **Re-run with the full 20–30 photo set after the OCR spatial filtering work (#46) to properly confirm the 80% gate.**
+3. ✅ Accuracy test: initial pass 9/12 clean photos (75%); after the recognition work (#46/#52/#55/#60) a harder **real-world phone re-test** (bookstore photos: angled, busy shelves, promo bands) landed at **~10/21 (~48%)**. See "Recognition Status" — the ~48% is the honest ceiling for hard photos; the approval flow (step 6) is what makes imperfect recognition usable, so we stopped tuning and moved on.
 4. ✅ Firestore persistence layer
 5. ✅ Visual dashboard — Home screen (Netflix-style rows) + Library screen (3-column grid, genre filter chips) + bottom nav (Home, Search, Capture, Import, Discover) + hamburger drawer (Full Library, Settings)
-6. Approval/confirmation screen (with uncertainty threshold) ← **NEXT** — full design spec in section below
-7. Book detail sidebar
+6. ✅ Approval/confirmation screen (with uncertainty threshold) — confidence routing (#41/#42), Tinder swipe review card (#43), manual search (#44), Import-tab wiring + summary popup (#45). Details in section below.
+7. Book detail sidebar ← **NEXT**
 8. Basic shelves and manual tags
 9. Mood quiz → ONE recommendation flow
 10. In-app housekeeping prompts
@@ -128,28 +128,29 @@ Then check the Build Order section to see the current step. The open issues tell
 - **Before public launch:** enable Firebase App Check, and add Android package name + SHA-1 restrictions to the Firebase API keys AND the Books API key in Google Cloud Console.
 - Never commit secrets to git. If a real secret is ever needed (paid API, etc.), it belongs behind a Cloud Function — never in the app.
 
-## POC Status (as of May 2026)
-The POC screen (`lib/screens/poc_screen.dart`) is fully running on the Android emulator.
-Recognition pipeline: ML Kit OCR → smart query builder → Google Books API → display top result + debug info.
+## Recognition Status (as of Jul 2026)
+Pipeline: ML Kit OCR (bundled on-device model) → query builder → Google Books API → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
 
-**Recognition results so far (clean photos):**
-- ✅ Working: Dream Hotel, Fair Play, The Castle, Lord of the Rings, Pines, Unbecoming, Transformed, Project Hail Mary, The Notebook
-- ⚠️ Near miss: Apeirogon (correct book appears in other matches but not best match — blurb text outscores the title)
-- ❌ Still failing: The Cruel Prince (ML Kit misreads "PRINCE" as "PBCE" — candidate for fuzzy title matching against API results, see planned issue G), House of Government (garbled all-caps lines outscore the correct title-case title)
-- 🔄 Not yet tested: Invisible Cities
-- Current accuracy: 9 of 12 tested = 75% (counts from the lists above) — full 20–30 photo re-test planned after #46 lands, before declaring the 80% gate passed
+**Accuracy:** initial clean-photo pass 9/12 (75%). After the recognition work below, a harder **real-world phone re-test** (bookstore photos: angled, busy shelves, promo/movie bands) landed at **~10/21 (~48%)** — a harder set than the POC, not a regression. This ~48% is the practical ceiling; the approval flow (step 6) is what makes imperfect recognition usable.
 
-**Bugs fixed (issues #2 and #3):**
-- #2: Compound surnames (McCann, FitzGerald, O'Brien, DeLuca) were falsely flagged as OCR garbage — fixed with segment-split approach in `_isSuspiciousWord()`
-- #3: `.take(12)` scan window was cutting off valid lines — removed entirely, scoring function is the guard against noise
+**Key constraint — OCR can't be improved app-side:** ML Kit's text model is BUNDLED (`com.google.mlkit:text-recognition:16.0.1`), identical across plugin versions and devices — NOT served via Play Services. Bumping the plugin (tried & closed in #56) doesn't change it. The physical device (arm64) reads worse than the emulator (x86_64) on the same model, so **always validate recognition on the physical device — the emulator flatters results.**
+
+**Recognition work shipped:**
+- #46 — screenshot-aware filtering: detect screenshot by portrait aspect ratio ≥1.85; zone downweighting + text-size weighting (screenshot-only, to protect clean-photo scoring); social-UI line filtering
+- #52 — fuzzy title matching: rerank candidates by normalized-Levenshtein similarity of title+author to the OCR (title 60% / author 40%); reorders only above a 0.6 threshold
+- #55 — query-builder junk filtering (taglines like "A NOVEL", publishers, review attributions, bestseller bands), letter-collapse ("NoTEB O O K"→"NoTEBOOK"), leading-operator stripping, and match-aware relaxation (retry with leading words when nothing matches the OCR)
+- #60 — drop edition/series ("10th Anniversary Edition", "Book 2 of the…") and film/TV adaptation banners
+- ⛔ Reverted: size-weighting for ALL photos (#58) regressed accuracy 10→7 — size doesn't reliably track the title on real covers. Size weighting stays screenshot-only.
+
+**Genuinely-hard cases → manual fallback (step 6), not more tuning:** destroyed OCR (e.g. "ANDY WEIR"→"WET R"), heavily stylized/embossed title fonts, common titles with no author captured.
 
 **Query builder logic** (`lib/services/books_api_service.dart`):
-- Filters: pure numbers, timestamps (`13:24`-style), OCR garbage (>25% of words have suspicious mixed casing), promotional lines (LONGLISTED, BESTSELLER, PRIZE, etc.)
-- Words split at lowercase→uppercase boundaries to allow compound surnames before checking for garbage
-- Scores ALL lines that pass filters (no scan window limit)
-- Scoring: lines containing `:` score 0.85 (metadata format); ALL CAPS lines score high (book titles); title-case multi-word lines score 0.65 (author names like "Nicholas Sparks"); lines >25 chars are penalized
-- OCR corrections applied first (`_applyOcrCorrections`, e.g. word-initial V before vowel → Y), falls back to the uncorrected query if the corrected one returns nothing
-- Builds query from top 3 scoring lines, max 120 chars
+- Filters (drop lines that are never search terms): length 4–40 chars, pure numbers, timestamps, OCR garbage (>25% suspicious mixed-case words), promotional/bestseller/adaptation banners, generic taglines, publisher names, review attributions (leading dash — also a Google negation operator), edition/series metadata; social-UI lines on screenshots.
+- Scoring: `:` lines 0.85; ALL CAPS high (titles); title-case multi-word 0.65 (author names); long lines penalized. Screenshots additionally apply zone + size multipliers.
+- `_applyOcrCorrections` (word-initial V→Y) + `_collapseSpacedLetters`; query = top 3 scoring lines joined (max 120 chars).
+- After fetch: fuzzy rerank (#52) + match-aware relaxation; `searchBooks` also returns a 0–1 confidence (#41).
+
+**Earlier bug fixes (#2, #3):** compound surnames (McCann, O'Brien…) no longer flagged as garbage (segment-split in `_isSuspiciousWord`); removed the `.take(12)` scan window (scoring is the guard).
 
 ## Dashboard Design Notes (Step 5 — Done)
 Richie's Figma prototype: https://www.figma.com/make/QjDuOmFO2heo8XJkhrGesw/Design-Bookedex-Library-Screen
@@ -167,68 +168,53 @@ Richie's Figma prototype: https://www.figma.com/make/QjDuOmFO2heo8XJkhrGesw/Desi
 - "Capture" bottom nav tab → entry point into capture flow (camera)
 - "Import" bottom nav tab → entry point into batch photo import → feeds approval screen (step 6)
 
-## Approval Screen Design Notes (Step 6 — After Dashboard)
-**Concept:** Tinder-style swipe card UI. Only shown for books the system is uncertain about.
+## Approval Screen Design Notes (Step 6 — Done)
+Tinder-style swipe review card, only shown for books the system is uncertain about. Built in `screens/approval_screen.dart` (+ `manual_search_screen.dart`, `import_screen.dart`), driven by `providers/import_provider.dart`.
 
-**Confidence threshold:**
-- ≥80% confidence → auto-save silently, user never sees the card
-- <80% confidence OR no OCR results → added to the approval queue
+**Confidence threshold — 75% (provisional):**
+- ≥75% → auto-save silently
+- <75% OR no confident match → approval queue
 
-**Confidence scoring approach (not yet implemented):**
-Derive a 0.0–1.0 score from the gap between the top result's internal query score and the second result's score. Large gap = high confidence. This requires changes to `BooksApiService` to expose the score alongside results.
+**Confidence scoring (implemented, `BooksApiService._confidence`):** `0.7 × topMatch + 0.3 × margin`, where topMatch is the #52 fuzzy similarity of the best result to the OCR and margin is how clearly it beats the runner-up (ambiguous common titles score lower). This *superseded* the original "gap between query scores" idea.
 
-**Calibration requirement:** the gap-based score is a homemade heuristic, not a real probability — "80%" on it means nothing until measured. Before trusting silent auto-add, run Margot's photo set through the scorer and check where correct vs. wrong matches actually land, then set the threshold from that data. Safety net for beta: auto-adds show a brief "Added [title]" toast with an Undo button, so silent additions are never invisible.
+**Calibration:** still a homemade heuristic. 21-photo phone set showed correct matches 62–90%, incorrect 0–70% — usable but weak separation, so 75% is provisional; **recalibrate on Margot's real photos**. Undo safety net exists in the notifier (`undoAutoAdd`, `deleteBook`); batch import surfaces a summary popup instead of per-book toasts.
 
-**Swipe gestures:**
-- Swipe right → save the book to library
-- Swipe left → skip/discard (book is not saved)
-- Swipe up → open manual search overlay (keyboard rises, search bar at top, live results)
+**Import flow (#45):** Import tab → `ImportScreen` "Choose Photos" → `pickMultiImage` → `importImages` routing (progress loader "Recognizing X of N…") → summary popup ("N added · M to review", "Review"/"Later") → approval queue.
 
-**Queue ordering:** Most confident first → least confident last. User gets easy confirms first and only has to type manually for the genuinely hard ones at the end.
+**Swipe / buttons (#43):** left = Incorrect (skip), right = Correct (save top guess), up = Manual Search. Buttons and swipes share one path. Card follows the finger with a tilt + fading ✓/✗/🔍 stamp, flies out on commit, springs back below threshold. Card is a keyed `_ReviewCard` owning its own drag offset (so advancing the queue disposes it cleanly — no snap-back flash). "See other matches" (`AnimatedSize`) reveals other candidates; tapping one approves it. A subtle "N to review" counter shows in the app bar. Perf: drag uses a `ValueNotifier` + `ValueListenableBuilder` (only the card rebuilds per frame — smooth in profile mode; debug is expectedly janky).
 
-**No-OCR state:** When OCR returned no usable text at all, the card shows the photo with "We couldn't read this one" and disables the right swipe — user must either search manually (swipe up) or skip (swipe left).
+**No-OCR state:** "We couldn't read this one", Correct disabled — user searches (swipe up) or skips (swipe left).
 
-**Manual search overlay:**
-- Triggered by swipe up
-- Search bar at top, keyboard opens immediately
-- Debounced Google Books API call as user types (Netflix-style live filtering)
-- Tapping a result saves that book and advances to the next card
+**Manual search (#44):** swipe-up/button → `ManualSearchScreen` (auto-focused field, 350ms debounce, live results with covers via `BooksApiService.searchByText`, request-id guard). Picking a result approves it and advances; cancelling leaves the card.
 
-**POC screen note:** `poc_screen.dart` stays alive as a dev tool during step 6 development so books can still be added for testing the dashboard. Remove or repurpose it when step 6 is fully wired in.
+**Step 6 issues — all merged:** #41 confidence score · #42 routing · #43 swipe card · #44 manual search · #45 Import wiring + summary popup (+ deleted `poc_screen.dart`).
 
-**GitHub issues for step 6 (created 2026-06-18):**
-- A. #41 — Add confidence score to `BooksApiService` search results (S)
-- B. #42 — Confidence-based routing — auto-save ≥80%, queue <80% into approval flow (S)
-- C. #43 — Build approval screen — tinder swipe card UI with all 3 states (L)
-- D. #44 — Build manual search overlay — debounced live Google Books results (M)
-- E. #45 — Wire approval screen into app, replace POC Save Book button (S)
-- F. #46 — Screenshot-aware OCR filtering (M). Fixes TikTok screenshots where UI text (top AND bottom) outscores the actual book title. Agreed design:
-  1. **Detect screenshots first** — image dimensions exactly match a device screen resolution / ~9:16 aspect ratio, no camera EXIF data. Camera photos skip all of the following, so the clean-photo accuracy results are untouched.
-  2. **Zone downweighting** — penalize (don't discard) text in the top ~15% and bottom ~30% of detected screenshots (TikTok nav + caption areas).
-  3. **Social-UI text filtering** — drop lines matching social patterns: `@handles`, `#hashtags`, known UI strings ("For You", "Following", "Add comment"), counts like "1.2M".
-  4. **Text-size weighting** — use ML Kit bounding box heights: book titles are large display type, captions/usernames are small UI text.
-  - Affects `BookRecognitionService` (return structured text + position + size data instead of raw String) and `BooksApiService` (incorporate the new signals into line scoring).
-  - **After implementing: re-run the full clean-photo test set** — the scoring function is load-bearing for the accuracy gate.
-
-**Planned but not yet created:**
-- G. Fuzzy title matching — rescore Google Books candidates by edit distance between candidate title/author and the OCR lines, so misreads like "PBCE"→"PRINCE" (The Cruel Prince) and garbled lines (House of Government) can still match the right book. (M)
+**Fast-follow ideas (not yet created):**
+- Option B import UX — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the current blocking loader.
+- Edition-picker / custom cover — let the user choose among a book's Google Books editions so the cover matches their physical copy (no storage needed); true custom-photo covers need Cloud Storage = Phase 2.
+- `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain.
+- Full "delight" import loading animation/game — Phase 2 polish.
 
 ## Key Files
 ```
 bookshelf_app/lib/
 ├── main.dart                        — Firebase init, dotenv, anonymous auth, ProviderScope → MainScaffold
-├── core/constants.dart              — googleBooksBaseUrl
+├── core/constants.dart              — googleBooksBaseUrl, autoAddConfidenceThreshold (0.75)
 ├── models/book.dart                 — Book model, fromGoogleBooksJson, fromFirestore, toFirestore (id, googleBooksId, dateAdded, genre, pageCount)
-├── services/book_recognition_service.dart  — ML Kit OCR, returns raw String
-├── services/books_api_service.dart  — query builder + Google Books API call
-├── services/book_repository.dart    — BookRepository: addBook (with duplicate check), watchBooks, deleteBook
-├── providers/recognition_provider.dart     — RecognitionState, bookRepositoryProvider, RecognitionNotifier (recognizeFromImage, saveBook)
+├── models/pending_book.dart         — PendingBook: one queued review card (imagePath, candidates, confidence; topGuess/otherMatches/hasResults)
+├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult (per-line text + bounding box + imageHeight + isScreenshot)
+├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText (free-text for manual search)
+├── services/book_repository.dart    — BookRepository: addBook (returns new doc id, null if duplicate), deleteBook, watchBooks
+├── providers/recognition_provider.dart     — bookRepositoryProvider (+ RecognitionNotifier, pending the Capture/camera flow)
+├── providers/import_provider.dart   — ImportNotifier: importImages routing, approval queue, autoAdded list, undoAutoAdd/approveTop/rejectTop, addedCount/reviewCount/progress
 ├── providers/books_provider.dart    — booksStreamProvider: StreamProvider<List<Book>> wrapping watchBooks()
 ├── screens/main_scaffold.dart       — 5-tab NavigationBar shell (Home, Search, Capture, Import, Discover) + IndexedStack
 ├── screens/home_screen.dart         — Home screen: Netflix-style rows (Your Library + genre rows) + hamburger drawer
 ├── screens/library_screen.dart      — Library screen: 3-column grid, genre filter chips, alphabetical sort
-├── screens/placeholder_screen.dart  — Reusable placeholder for Search, Capture, Discover tabs
-└── screens/poc_screen.dart          — DEV TOOL: pick photo, show results, save book button — temporary until step 6
+├── screens/import_screen.dart       — Import tab: Choose Photos → routing (progress) → summary popup → review queue
+├── screens/approval_screen.dart     — Tinder swipe review card (keyed _ReviewCard: drag/animations, see-other-matches, no-OCR/complete states)
+├── screens/manual_search_screen.dart — debounced live Google Books search, returns the picked Book
+└── screens/placeholder_screen.dart  — Reusable placeholder for Search, Capture, Discover tabs
 ```
 
 ## Roadmap
