@@ -50,11 +50,13 @@ class BookRecognitionService {
 
   Future<(int width, int height)> _imageDimensions(XFile image) async {
     final bytes = await image.readAsBytes();
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    final decoded = frame.image;
-    final dimensions = (decoded.width, decoded.height);
-    decoded.dispose();
+    // Read only the image header for dimensions — no full-pixel decode (which
+    // would stall the UI thread on large photos and stutter the loading spinner).
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    final descriptor = await ui.ImageDescriptor.encoded(buffer);
+    final dimensions = (descriptor.width, descriptor.height);
+    descriptor.dispose();
+    buffer.dispose();
     return dimensions;
   }
 

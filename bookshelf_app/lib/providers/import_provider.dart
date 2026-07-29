@@ -18,11 +18,15 @@ class ImportState {
   final List<PendingBook> queue; // needs review, most-confident-first
   final List<AutoAdded> autoAdded; // silently added this import
   final bool importing;
+  final int processed; // photos routed so far this import
+  final int total; // photos in the current import
 
   const ImportState({
     this.queue = const [],
     this.autoAdded = const [],
     this.importing = false,
+    this.processed = 0,
+    this.total = 0,
   });
 
   int get addedCount => autoAdded.length;
@@ -32,11 +36,15 @@ class ImportState {
     List<PendingBook>? queue,
     List<AutoAdded>? autoAdded,
     bool? importing,
+    int? processed,
+    int? total,
   }) {
     return ImportState(
       queue: queue ?? this.queue,
       autoAdded: autoAdded ?? this.autoAdded,
       importing: importing ?? this.importing,
+      processed: processed ?? this.processed,
+      total: total ?? this.total,
     );
   }
 }
@@ -51,9 +59,10 @@ class ImportNotifier extends StateNotifier<ImportState> {
   BookRepository get _repo => _ref.read(bookRepositoryProvider);
 
   Future<void> importImages(List<XFile> images) async {
-    state = const ImportState(importing: true);
+    state = ImportState(importing: true, total: images.length);
     for (final image in images) {
       await _route(image);
+      state = state.copyWith(processed: state.processed + 1);
     }
     state = state.copyWith(importing: false);
   }

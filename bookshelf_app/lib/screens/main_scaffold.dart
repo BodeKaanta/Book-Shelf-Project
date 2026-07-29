@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
+import 'import_screen.dart';
 import 'placeholder_screen.dart';
-import 'poc_screen.dart';
 
 class MainScaffold extends StatefulWidget {
   const MainScaffold({super.key});
@@ -17,7 +17,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     HomeScreen(),
     PlaceholderScreen(label: 'Search'),
     PlaceholderScreen(label: 'Capture'),
-    PocScreen(),
+    ImportScreen(),
     PlaceholderScreen(label: 'Discover'),
   ];
 
