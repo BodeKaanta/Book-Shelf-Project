@@ -69,8 +69,8 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 **Import resolution strategy (perf):** batch import downscales at pick time (`maxWidth/maxHeight: 2000`) so ML Kit isn't chewing 12MP photos per book — a per-book hiccup on a busy import reads as jank (matters for the influencer demo) and even blocked tab-switching at full res. Camera capture stays **full resolution** on purpose: it's a single image, so the OCR cost is a one-time wait, not a repeating hiccup, and full res gives the best recognition (e.g. thin/vertical cover text like *Authority*, which fails when downscaled). The proper fix to remove the residual batch hiccup entirely is background processing (#66) — OCR can't be moved off the main isolate with this plugin.
 
 **Import writes + dedup:** confident auto-adds are collected during the loop and written in **one `WriteBatch` after the loop** (not per book) — avoids N Firestore writes + N Home rebuilds mid-import. Duplicate detection matches on **title + author** (not just `googleBooksId`), so two captures of the same book that resolve to different Google Books editions don't both get added. Duplicates on the swipe/manual-search path show an "already in your library" snackbar; the import summary shows an "N already in your library" line.
-6b. Cascading card stack on the review screen (#68) ← **NEXT** — staggered next cards behind the current one (pre-renders the next card's image to remove the between-card pause), plus fix the brief Import-start-screen flash before the loader.
-7. Book detail sidebar
+6b. ✅ Cascading card stack on the review screen (#68) — next two queued cards staggered behind the current one, mounted in full so the photo *and* cover thumbnail are decoded before promotion; the deck animates forward during the fly-out so the queue advance is invisible. Also fixed the picker-return flash on Import and Capture.
+7. Book detail sidebar ← **NEXT**
 8. Basic shelves and manual tags
 9. Mood quiz → ONE recommendation flow
 10. In-app housekeeping prompts
@@ -189,15 +189,17 @@ Tinder-style swipe review card, only shown for books the system is uncertain abo
 
 **Swipe / buttons (#43):** left = Incorrect (skip), right = Correct (save top guess), up = Manual Search. Buttons and swipes share one path. Card follows the finger with a tilt + fading ✓/✗/🔍 stamp, flies out on commit, springs back below threshold. Card is a keyed `_ReviewCard` owning its own drag offset (so advancing the queue disposes it cleanly — no snap-back flash). "See other matches" (`AnimatedSize`) reveals other candidates; tapping one approves it. A subtle "N to review" counter shows in the app bar. Perf: drag uses a `ValueNotifier` + `ValueListenableBuilder` (only the card rebuilds per frame — smooth in profile mode; debug is expectedly janky).
 
+**Cascading card stack (#68, step 6b):** the next two queue items render staggered behind the current card, each translated down `_stackStep` (12) and scaled `_stackScaleStep` (0.04) about `Alignment.bottomCenter` — bottom-edge scaling pins the peek to exactly 12px per depth without measuring the card. Back cards are mounted **in full** (not photo-only): that pre-decodes the photo *and* the `Image.network` cover thumbnail, so promotion never pops content in. All cards share `cacheWidth: 1080` — a different decode width would mean a different image-cache key and the pre-decode would buy nothing.
+The deck animates forward off the existing fly-out `AnimationController` (gated by `_committing`, so spring-back and manual search don't promote), reaching depth 0 — identity transform — before the queue advances, so the swap is invisible. **Bottom reserve is constant (`12 × _maxBackCards`), not scaled to queue depth:** otherwise the top card's own bounds change as the queue shrinks and every advance snaps. Costs ~24px of dead space under the last card; worth it for a card that never reflows. Stack is `Clip.none` so the committed card flies clear and shadows aren't cut off.
+
 **No-OCR state:** "We couldn't read this one", Correct disabled — user searches (swipe up) or skips (swipe left).
 
 **Manual search (#44):** swipe-up/button → `ManualSearchScreen` (auto-focused field, 350ms debounce, live results with covers via `BooksApiService.searchByText`, request-id guard). Picking a result approves it and advances; cancelling leaves the card.
 
-**Step 6 issues — all merged:** #41 confidence score · #42 routing · #43 swipe card · #44 manual search · #45 Import wiring + summary popup (+ deleted `poc_screen.dart`).
+**Step 6 issues — all merged:** #41 confidence score · #42 routing · #43 swipe card · #44 manual search · #45 Import wiring + summary popup (+ deleted `poc_screen.dart`) · #68 cascading card stack + picker-return flash.
 
 **Follow-ups filed as issues:**
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
-- **#68 (step 6b — cascading card stack)** — show the next queued cards staggered behind the current review card (Pokémon TCG Pocket-style); shows queue depth AND pre-renders the next card's image to kill the between-card pause. Also tracks a small import-transition flash (Import start screen shows for a frame before the loader).
 
 **Ideas not yet created:**
 - Edition-picker / custom cover — let the user choose among a book's Google Books editions so the cover matches their physical copy (no storage needed); true custom-photo covers need Cloud Storage = Phase 2.
