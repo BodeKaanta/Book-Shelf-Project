@@ -465,7 +465,7 @@ class _ReviewCardState extends State<_ReviewCard>
         width: width,
         height: width * 1.5,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => placeholder,
+        errorBuilder: (_, _, _) => placeholder,
       ),
     );
   }
@@ -476,7 +476,7 @@ class _ReviewCardState extends State<_ReviewCard>
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: pending.otherMatches.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, i) {
           final book = pending.otherMatches[i];
           return GestureDetector(

@@ -191,7 +191,7 @@ class _CoverTile extends StatelessWidget {
                 width: 110,
                 height: 160,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _placeholder(),
+                errorBuilder: (_, _, _) => _placeholder(),
               )
             : _placeholder(),
       ),
