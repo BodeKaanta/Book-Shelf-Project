@@ -134,6 +134,23 @@ Then check the Build Order section to see the current step. The open issues tell
 - **Before public launch:** enable Firebase App Check, and add Android package name + SHA-1 restrictions to the Firebase API keys AND the Books API key in Google Cloud Console.
 - Never commit secrets to git. If a real secret is ever needed (paid API, etc.), it belongs behind a Cloud Function — never in the app.
 
+## Release Builds (Android)
+**The dart-define is not optional:**
+```
+flutter build appbundle --dart-define-from-file=.env
+```
+Without it the Books API key is missing and every lookup returns HTTP 429. `main()` asserts the key is present, but **asserts are stripped in release builds** — so a keyless release build fails *silently*: recognition simply never works, with no error. This is the easiest way to ship a broken beta.
+
+**Signing:** upload keystore at `C:\Users\bodek\keys\bookedex-upload-keystore.jks` (alias `upload`, RSA 2048, valid to Dec 2053), deliberately **outside the repo**. `android/key.properties` holds the path + passwords; it and `*.jks` / `*.keystore` are gitignored. `build.gradle.kts` falls back to debug signing when `key.properties` is absent, so a fresh clone still configures and `flutter run` works — meaning **a machine without those files silently produces a debug-signed bundle that Play will reject.** Verify with `keytool -printcert -jarfile <aab>`; it must show `CN=Bode Kaanta`, not `CN=Android Debug`.
+
+**Three files git will never carry** — copy them by hand when moving machines: `.env`, `android/key.properties`, and the `.jks` keystore.
+
+**R8:** `android/app/proguard-rules.pro` carries `-dontwarn` for ML Kit's chinese/devanagari/japanese/korean recognizer packages. The plugin's `initialize()` references the options class for every script, but we only bundle the Latin model, and R8 treats the absent ones as fatal missing references. **Release-only failure — it cannot reproduce in debug**, so always build the bundle before assuming a change is shippable. R8 also strips unused code, so a release build needs its own smoke test on a device.
+
+**Icon:** source art `assets/icon/bookedex_icon.png`; regenerate with `dart run flutter_launcher_icons` after changing it (config in `pubspec.yaml`). Adaptive background `#EA3442` sampled from the art, 18% foreground inset so the launcher mask doesn't clip the B.
+
+**Play requirements already met:** `targetSdk`/`compileSdk` 36, `minSdk` 24, `applicationId` `com.bookedex.app`, label "Bookedex". The **store-listing** icon must be exactly 512×512 — the source art is 513×513 and will be rejected until resized.
+
 ## Recognition Status (as of Jul 2026)
 Pipeline: ML Kit OCR (bundled on-device model) → query builder → Google Books API → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
 

@@ -46,3 +46,10 @@ app.*.map.json
 
 # Environment variables — never commit API keys
 .env
+
+# Release signing — leaking these lets someone publish updates as Bookedex,
+# and it cannot be revoked. Losing them means never updating the app again:
+# keep a backup somewhere off this machine.
+android/key.properties
+*.jks
+*.keystore
