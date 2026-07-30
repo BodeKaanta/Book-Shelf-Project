@@ -6,6 +6,8 @@ import '../models/pending_book.dart';
 import '../providers/import_provider.dart';
 import 'manual_search_screen.dart';
 
+const _maxBackCards = 2;
+
 class ApprovalScreen extends ConsumerWidget {
   const ApprovalScreen({super.key});
 
@@ -42,6 +44,7 @@ class ApprovalScreen extends ConsumerWidget {
               // (no shared drag offset to snap back — fixes the flash).
               key: ValueKey(queue.first.imagePath),
               pending: queue.first,
+              upNext: queue.skip(1).take(_maxBackCards).toList(),
               onApprove: (book) => _approve(context, notifier, book),
               onReject: notifier.rejectTop,
               onManualSearch: () => _manualSearch(context, notifier),
@@ -91,6 +94,7 @@ class ApprovalScreen extends ConsumerWidget {
 
 class _ReviewCard extends StatefulWidget {
   final PendingBook pending;
+  final List<PendingBook> upNext;
   final void Function(Book) onApprove;
   final VoidCallback onReject;
   final VoidCallback onManualSearch;
@@ -98,6 +102,7 @@ class _ReviewCard extends StatefulWidget {
   const _ReviewCard({
     super.key,
     required this.pending,
+    required this.upNext,
     required this.onApprove,
     required this.onReject,
     required this.onManualSearch,
@@ -110,10 +115,36 @@ class _ReviewCard extends StatefulWidget {
 class _ReviewCardState extends State<_ReviewCard>
     with SingleTickerProviderStateMixin {
   bool _showOtherMatches = false;
+  bool _committing = false;
   final ValueNotifier<Offset> _drag = ValueNotifier(Offset.zero);
   late final AnimationController _controller;
 
   static const double _swipeThreshold = 100;
+  static const double _stackStep = 12;
+  static const double _stackScaleStep = 0.04;
+  static const double _stackDim = 0.18;
+
+  // Constant, not scaled to the current queue depth: if the top card's own
+  // bounds changed as the queue shrank, every advance would snap.
+  static const double _stackReserve = _stackStep * _maxBackCards;
+
+  // Slides the deck forward while the top card flies out, so the promoted card
+  // is already at depth 0 when the queue advances. Spring-back and manual
+  // search reuse the same controller and must not promote.
+  double get _promotion =>
+      _committing ? Curves.easeOut.transform(_controller.value) : 0;
+
+  // Every card must decode at the same width, or the queued card behind gets a
+  // different image-cache key and the pre-decode buys nothing.
+  static const int _cardDecodeWidth = 1080;
+
+  static final _cardShadow = [
+    BoxShadow(
+      color: Colors.black.withValues(alpha: 0.25),
+      blurRadius: 10,
+      offset: const Offset(0, 3),
+    ),
+  ];
 
   @override
   void initState() {
@@ -145,6 +176,7 @@ class _ReviewCardState extends State<_ReviewCard>
   // Fly off-screen, then hand control back to the parent, which advances the
   // queue and disposes this card — so there's nothing left to snap back.
   void _flyOut(Offset direction, VoidCallback action) {
+    _committing = true;
     final size = MediaQuery.of(context).size;
     _animateTo(direction.scale(size.width, size.height), onDone: action);
   }
@@ -181,24 +213,40 @@ class _ReviewCardState extends State<_ReviewCard>
         child: Column(
           children: [
             Expanded(
-              child: GestureDetector(
-                onPanUpdate: (d) => _drag.value += d.delta,
-                onPanEnd: (_) => _onDragEnd(),
-                child: ValueListenableBuilder<Offset>(
-                  valueListenable: _drag,
-                  child: _card(pending),
-                  builder: (context, drag, child) {
-                    return Transform.translate(
-                      offset: drag,
-                      child: Transform.rotate(
-                        angle: drag.dx / 1500,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [child!, _dragStamp(drag)],
+              // Tight width: a Stack of only Positioned children collapses
+              // under the loose constraints a Column hands out.
+              child: SizedBox(
+                width: double.infinity,
+                // Clip.none so the committed card flies clear of these bounds
+                // and card shadows aren't cut off at the edges.
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (var depth = widget.upNext.length; depth >= 1; depth--)
+                      _stackedCard(widget.upNext[depth - 1], depth),
+                    _cardSlot(
+                      child: GestureDetector(
+                        onPanUpdate: (d) => _drag.value += d.delta,
+                        onPanEnd: (_) => _onDragEnd(),
+                        child: ValueListenableBuilder<Offset>(
+                          valueListenable: _drag,
+                          child: _card(pending),
+                          builder: (context, drag, child) {
+                            return Transform.translate(
+                              offset: drag,
+                              child: Transform.rotate(
+                                angle: drag.dx / 1500,
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [child!, _dragStamp(drag)],
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
-                    );
-                  },
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -233,38 +281,94 @@ class _ReviewCardState extends State<_ReviewCard>
     );
   }
 
-  Widget _card(PendingBook pending) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.file(File(pending.imagePath), fit: BoxFit.cover),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black87],
-                ),
-              ),
-              child: pending.hasResults
-                  ? _matchInfo(pending)
-                  : const Text(
-                      "We couldn't read this one",
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold),
+  Positioned _cardSlot({required Widget child}) {
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: _stackReserve,
+      child: child,
+    );
+  }
+
+  // Queued cards are mounted in full behind the current one, so both the photo
+  // and the cover thumbnail are already decoded when one is promoted — nothing
+  // pops in mid-reveal. Scaling about the bottom edge makes the peek below the
+  // card exactly _stackStep per depth without measuring the card.
+  Widget _stackedCard(PendingBook pending, int depth) {
+    return _cardSlot(
+      child: AnimatedBuilder(
+        animation: _controller,
+        child: _card(pending),
+        builder: (context, child) {
+          final depthNow = depth - _promotion;
+          return Transform.translate(
+            offset: Offset(0, _stackStep * depthNow),
+            child: Transform.scale(
+              scale: 1 - _stackScaleStep * depthNow,
+              alignment: Alignment.bottomCenter,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  child!,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: ColoredBox(
+                      color: Colors.black
+                          .withValues(alpha: _stackDim * depthNow),
                     ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _card(PendingBook pending) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: _cardShadow,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(
+              File(pending.imagePath),
+              fit: BoxFit.cover,
+              cacheWidth: _cardDecodeWidth,
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Colors.black87],
+                  ),
+                ),
+                child: pending.hasResults
+                    ? _matchInfo(pending)
+                    : const Text(
+                        "We couldn't read this one",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold),
+                      ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

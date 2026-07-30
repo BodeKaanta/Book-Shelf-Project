@@ -59,13 +59,19 @@ class CaptureScreen extends ConsumerWidget {
   }
 
   Future<void> _capture(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(importProvider.notifier);
+    notifier.beginPicking();
+
     // Full resolution on purpose: a single capture is one image, so the OCR
     // cost is a one-time wait (not a per-book hiccup like batch import) — worth
     // it for the best recognition, including thin/vertical cover text.
     final image = await ImagePicker().pickImage(source: ImageSource.camera);
-    if (image == null) return;
+    if (image == null) {
+      notifier.cancelPicking();
+      return;
+    }
 
-    await ref.read(importProvider.notifier).importImages([image]);
+    await notifier.importImages([image]);
     if (!context.mounted) return;
 
     final s = ref.read(importProvider);

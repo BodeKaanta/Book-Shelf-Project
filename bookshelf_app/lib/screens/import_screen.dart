@@ -26,11 +26,13 @@ class ImportScreen extends ConsumerWidget {
       children: [
         const CircularProgressIndicator(),
         const SizedBox(height: 20),
-        const Text('Recognizing your books…',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-        const SizedBox(height: 4),
-        Text('${s.processed} of ${s.total}',
-            style: TextStyle(color: Colors.grey.shade600)),
+        Text(s.picking ? 'Loading your photos…' : 'Recognizing your books…',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+        if (!s.picking) ...[
+          const SizedBox(height: 4),
+          Text('${s.processed} of ${s.total}',
+              style: TextStyle(color: Colors.grey.shade600)),
+        ],
       ],
     );
   }
@@ -67,6 +69,9 @@ class ImportScreen extends ConsumerWidget {
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(importProvider.notifier);
+    notifier.beginPicking();
+
     // Downscale natively at pick time — ML Kit on a ~2000px image instead of a
     // full 12MP photo is far lighter and keeps the UI responsive. Cover text
     // stays legible at this size.
@@ -75,9 +80,12 @@ class ImportScreen extends ConsumerWidget {
       maxHeight: 2000,
       imageQuality: 90,
     );
-    if (images.isEmpty) return;
+    if (images.isEmpty) {
+      notifier.cancelPicking();
+      return;
+    }
 
-    await ref.read(importProvider.notifier).importImages(images);
+    await notifier.importImages(images);
     if (!context.mounted) return;
 
     final s = ref.read(importProvider);

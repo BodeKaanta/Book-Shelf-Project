@@ -33,6 +33,7 @@ class ImportState {
 
   int get addedCount => autoAdded.length;
   int get reviewCount => queue.length;
+  bool get picking => importing && total == 0;
 
   ImportState copyWith({
     List<PendingBook>? queue,
@@ -61,6 +62,14 @@ class ImportNotifier extends StateNotifier<ImportState> {
   final _booksApi = BooksApiService();
 
   BookRepository get _repo => _ref.read(bookRepositoryProvider);
+
+  // The OS picker/camera runs as its own activity, so our activity resumes and
+  // renders frames again *before* the picked files arrive over the platform
+  // channel. Showing the loader up front stops the start screen flashing in
+  // that gap.
+  void beginPicking() => state = const ImportState(importing: true);
+
+  void cancelPicking() => state = const ImportState();
 
   Future<void> importImages(List<XFile> images) async {
     state = ImportState(importing: true, total: images.length);
