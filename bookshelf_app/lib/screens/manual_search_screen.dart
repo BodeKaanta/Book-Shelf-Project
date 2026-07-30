@@ -87,7 +87,7 @@ class _ManualSearchScreenState extends State<ManualSearchScreen> {
 
     return ListView.separated(
       itemCount: _results.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
+      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final book = _results[i];
         return ListTile(
@@ -116,7 +116,7 @@ class _ManualSearchScreenState extends State<ManualSearchScreen> {
         width: width,
         height: width * 1.5,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => placeholder,
+        errorBuilder: (_, _, _) => placeholder,
       ),
     );
   }

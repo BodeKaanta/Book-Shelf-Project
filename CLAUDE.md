@@ -139,6 +139,8 @@ Pipeline: ML Kit OCR (bundled on-device model) → query builder → Google Book
 
 **Accuracy:** initial clean-photo pass 9/12 (75%). After the recognition work below, a harder **real-world phone re-test** (bookstore photos: angled, busy shelves, promo/movie bands) landed at **~10/21 (~48%)** — a harder set than the POC, not a regression. This ~48% is the practical ceiling; the approval flow (step 6) is what makes imperfect recognition usable.
 
+**The 21-photo test set is Margot's own collection** — every accuracy and confidence number above comes from real target-user photos, which is why ~48% is treated as the honest ceiling rather than something to tune away.
+
 **Key constraint — OCR can't be improved app-side:** ML Kit's text model is BUNDLED (`com.google.mlkit:text-recognition:16.0.1`), identical across plugin versions and devices — NOT served via Play Services. Bumping the plugin (tried & closed in #56) doesn't change it. The physical device (arm64) reads worse than the emulator (x86_64) on the same model, so **always validate recognition on the physical device — the emulator flatters results.**
 
 **Recognition work shipped:**
@@ -183,7 +185,7 @@ Tinder-style swipe review card, only shown for books the system is uncertain abo
 
 **Confidence scoring (implemented, `BooksApiService._confidence`):** `0.7 × topMatch + 0.3 × margin`, where topMatch is the #52 fuzzy similarity of the best result to the OCR and margin is how clearly it beats the runner-up (ambiguous common titles score lower). This *superseded* the original "gap between query scores" idea.
 
-**Calibration:** still a homemade heuristic. 21-photo phone set showed correct matches 62–90%, incorrect 0–70% — usable but weak separation, so 75% is provisional; **recalibrate on Margot's real photos**. Undo safety net exists in the notifier (`undoAutoAdd`, `deleteBook`); batch import surfaces a summary popup instead of per-book toasts.
+**Calibration — already done on real target-user photos.** The 21-photo phone set **is Margot's own collection**, so 0.75 is calibrated against real target-user data, not synthetic or developer-picked photos. There is no pending "recalibrate on Margot's photos" task. On that set correct matches scored 62–90% and incorrect ones 0–70%: the separation is genuinely weak, and that is a property of the confidence formula itself, not an artifact of an unrepresentative test set — so re-running the same photos won't improve it. 0.75 is the best compromise found. Only two things would move it: a better scorer, or beta data at a much larger N. Undo safety net exists in the notifier (`undoAutoAdd`, `deleteBook`); batch import surfaces a summary popup instead of per-book toasts.
 
 **Import flow (#45):** Import tab → `ImportScreen` "Choose Photos" → `pickMultiImage` → `importImages` routing (progress loader "Recognizing X of N…") → summary popup ("N added · M to review", "Review"/"Later") → approval queue.
 

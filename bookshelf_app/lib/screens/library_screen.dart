@@ -154,7 +154,7 @@ class _GridTile extends StatelessWidget {
               ? Image.network(
                   url,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => _placeholder(),
+                  errorBuilder: (_, _, _) => _placeholder(),
                 )
               : _placeholder(),
           if (book.genre != null && book.genre!.isNotEmpty)
@@ -167,7 +167,7 @@ class _GridTile extends StatelessWidget {
                   vertical: 3,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.6),
+                  color: Colors.black.withValues(alpha: 0.6),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
