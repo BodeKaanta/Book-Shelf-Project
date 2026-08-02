@@ -7,10 +7,12 @@ import 'screens/main_scaffold.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  assert(
-    const String.fromEnvironment('GOOGLE_BOOKS_API_KEY').isNotEmpty,
-    'Missing Google Books API key — run with --dart-define-from-file=.env',
-  );
+  // Open Library needs no key, so builds no longer require the dart-define.
+  // Restore alongside the Google Books path if its corpus recovers (#75).
+  // assert(
+  //   const String.fromEnvironment('GOOGLE_BOOKS_API_KEY').isNotEmpty,
+  //   'Missing Google Books API key — run with --dart-define-from-file=.env',
+  // );
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   if (FirebaseAuth.instance.currentUser == null) {

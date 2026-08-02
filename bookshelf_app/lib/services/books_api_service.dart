@@ -5,8 +5,9 @@ import '../core/constants.dart';
 import '../models/book.dart';
 import 'book_recognition_service.dart';
 
+// Open Library needs no key. Kept for a fast switch back to Google Books (#75).
 // Injected at build time: flutter run --dart-define-from-file=.env
-const _apiKey = String.fromEnvironment('GOOGLE_BOOKS_API_KEY');
+// const _apiKey = String.fromEnvironment('GOOGLE_BOOKS_API_KEY');
 
 class BooksApiService {
   Future<({List<Book> books, String query, double confidence})> searchBooks(
@@ -82,21 +83,53 @@ class BooksApiService {
 
   Future<List<Book>?> _fetchBooks(String query, [int maxResults = 5]) async {
     final uri = Uri.parse(
-      '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=$maxResults&key=$_apiKey',
+      '$openLibraryBaseUrl?q=${Uri.encodeComponent(query)}&limit=$maxResults'
+      '&fields=key,title,author_name,cover_i,number_of_pages_median,subject',
     );
 
-    final response = await http.get(uri);
+    final http.Response response;
+    try {
+      response = await http
+          .get(uri, headers: {'User-Agent': openLibraryUserAgent})
+          .timeout(bookLookupTimeout);
+    } on Exception {
+      return null;
+    }
     if (response.statusCode != 200) return null;
 
     final data = json.decode(response.body) as Map<String, dynamic>;
-    final items = data['items'] as List<dynamic>?;
-    if (items == null) return null;
+    final docs = data['docs'] as List<dynamic>?;
+    // Google Books omitted `items` entirely on a miss; Open Library always
+    // returns `docs`, empty. Callers distinguish null (try another query) from
+    // a non-empty list, so an empty result must stay null or the retry paths
+    // above are skipped.
+    if (docs == null || docs.isEmpty) return null;
 
-    return items
+    return docs
         .whereType<Map<String, dynamic>>()
-        .map(Book.fromGoogleBooksJson)
+        .map(Book.fromOpenLibraryJson)
         .toList();
   }
+
+  // Google Books fetch — kept for a fast switch back if its corpus recovers.
+  // Future<List<Book>?> _fetchBooksGoogle(String query,
+  //     [int maxResults = 5]) async {
+  //   final uri = Uri.parse(
+  //     '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=$maxResults&key=$_apiKey',
+  //   );
+  //
+  //   final response = await http.get(uri);
+  //   if (response.statusCode != 200) return null;
+  //
+  //   final data = json.decode(response.body) as Map<String, dynamic>;
+  //   final items = data['items'] as List<dynamic>?;
+  //   if (items == null) return null;
+  //
+  //   return items
+  //       .whereType<Map<String, dynamic>>()
+  //       .map(Book.fromGoogleBooksJson)
+  //       .toList();
+  // }
 
   // Reorder candidates so the one whose title best matches the OCR text wins.
   // Only reorders when a genuinely close match exists (>= threshold), otherwise
