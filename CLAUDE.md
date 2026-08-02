@@ -16,8 +16,8 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 |---|---|
 | Frontend | Flutter / Dart |
 | Backend | Firebase (Firestore, Auth) — Cloud Storage not needed until Phase 2 |
-| Book Recognition | Google ML Kit on-device OCR → text → Google Books API |
-| Book Data | Google Books API (primary), Open Library (fallback) |
+| Book Recognition | Google ML Kit on-device OCR → text → Open Library search |
+| Book Data | **Open Library** (primary since #75). Google Books is commented out, not deleted — its corpus stopped returning mainstream titles |
 | State Management | Riverpod |
 | Notifications | In-app prompts only (NO push notifications in MVP) |
 | Monetization | Google Play Billing (Pro tier), affiliate links (Phase 3) |
@@ -128,18 +128,18 @@ Then check the Build Order section to see the current step. The open issues tell
 - Cloud Storage not used in MVP — book cover art is stored as Google Books API URLs in Firestore, no file storage needed. (Screenshot import doesn't change this: screenshots are matched to a Google Books result and only the cover URL is stored.) Revisit in Phase 2 only if we ever need to keep the user's original photo as a fallback cover.
 
 ## API Keys & Secrets
-- **Google Books API key is REQUIRED** — keyless calls return HTTP 429 (Google attributes them to a shared anonymous quota pool that is permanently exhausted; learned the hard way in #48/#50). The key lives in `bookshelf_app/.env` (gitignored) and is injected at build time, not bundled: run with `flutter run --dart-define-from-file=.env`, read in code via `String.fromEnvironment('GOOGLE_BOOKS_API_KEY')`. Debug builds assert the key is present in `main()`.
+- **No API key is currently needed.** Open Library is keyless (#75), so `.env` and the dart-define are optional and `main()`'s key assert is commented out. `.env` is kept for a fast switch back to Google Books.
+- **If Google Books is ever re-enabled, its key is REQUIRED** — keyless calls return HTTP 429 (Google attributes them to a shared anonymous quota pool that is permanently exhausted; learned the hard way in #48/#50, and re-confirmed in #75). The key lives in `bookshelf_app/.env` (gitignored) and is injected at build time, not bundled: run with `flutter run --dart-define-from-file=.env`, read in code via `String.fromEnvironment('GOOGLE_BOOKS_API_KEY')`.
 - **Honest threat model:** any key shipped in a client app is extractable — dart-define is obfuscation, not protection. The real security control is console-side: in Google Cloud Console, restrict the key to the Books API only and cap its daily quota. Books API is free with no billing attached, so a leaked key can only waste quota — no money or data at risk.
 - The Firebase keys in `firebase_options.dart` / `google-services.json` are identifiers, not secrets — safe to commit. Data access is enforced by Firestore security rules, not by hiding these keys.
 - **Before public launch:** enable Firebase App Check, and add Android package name + SHA-1 restrictions to the Firebase API keys AND the Books API key in Google Cloud Console.
 - Never commit secrets to git. If a real secret is ever needed (paid API, etc.), it belongs behind a Cloud Function — never in the app.
 
 ## Release Builds (Android)
-**The dart-define is not optional:**
 ```
 flutter build appbundle --dart-define-from-file=.env
 ```
-Without it the Books API key is missing and every lookup returns HTTP 429. `main()` asserts the key is present, but **asserts are stripped in release builds** — so a keyless release build fails *silently*: recognition simply never works, with no error. This is the easiest way to ship a broken beta.
+The dart-define is **currently optional** — Open Library needs no key (#75). Keep using it out of habit: it costs nothing, and if Google Books is ever re-enabled it becomes mandatory again. The trap it used to hide is worth remembering: a keyless Google Books build failed *silently*, because `main()`'s assert is stripped in release, so recognition simply never worked with no error at all.
 
 **Signing:** upload keystore at `C:\Users\bodek\keys\bookedex-upload-keystore.jks` (alias `upload`, RSA 2048, valid to Dec 2053), deliberately **outside the repo**. `android/key.properties` holds the path + passwords; it and `*.jks` / `*.keystore` are gitignored. `build.gradle.kts` falls back to debug signing when `key.properties` is absent, so a fresh clone still configures and `flutter run` works — meaning **a machine without those files silently produces a debug-signed bundle that Play will reject.** Verify with `keytool -printcert -jarfile <aab>`; it must show `CN=Bode Kaanta`, not `CN=Android Debug`.
 
@@ -151,8 +151,21 @@ Without it the Books API key is missing and every lookup returns HTTP 429. `main
 
 **Play requirements already met:** `targetSdk`/`compileSdk` 36, `minSdk` 24, `applicationId` `com.bookedex.app`, label "Bookedex". The **store-listing** icon must be exactly 512×512 — the source art is 513×513 and will be rejected until resized.
 
-## Recognition Status (as of Jul 2026)
-Pipeline: ML Kit OCR (bundled on-device model) → query builder → Google Books API → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
+## Recognition Status (as of Aug 2026)
+Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Open Library search** → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
+
+### Data source switched to Open Library (#75, Aug 2026)
+**Google Books stopped returning mainstream commercial books.** `isbn:9780593135204` (Project Hail Mary) and `isbn:9780553418026` (The Martian) both return `totalItems: 0`; `q=harry potter` returns academic commentary and no Rowling; every query returns exactly `totalItems: 300`. Ruled out as causes: an invalid key (a deliberately bad key returns HTTP 400 "API key not valid"; ours returns 200 with valid JSON), URL/protocol formatting (those produce 400s, not parsed volumes), and quota (keyless 429s, keyed requests succeed). `isbn:` is an exact index lookup, so this is not a query-builder problem. Cause unknown and possibly reversible — hence Google Books is commented out rather than deleted.
+
+**Two behavioural differences that matter:**
+- **Open Library returns `docs: []` on a miss; Google Books omitted `items` entirely.** Callers distinguish null (try another query) from results, so `_fetchBooks` must map empty → null or the retry paths are silently skipped.
+- **Open Library's Solr matches literally; Google Books ranked by popularity and tolerated junk.** `q=HAIL` returns Project Hail Mary #1, but `q=HAIL AUTHOR OF` returns *Hail and farewell* / *The Merchant of Venice* — junk tokens actively poison the query rather than merely diluting it. Google's ranking was silently rescuing weak queries; that mask is now gone, which is what #78 addresses. Sorting cannot substitute: `sort=editions`/`readinglog`/`rating` flood results with Macbeth and King Lear by edition count.
+
+**Confidence separation improved.** On the 20-photo run: correct matches 70–85%, incorrect 19–60% — a clean gap, versus Google's overlapping 62–90 / 0–70. Measured threshold is **0.65**, but it stays at 0.75 until #78 lands so we recalibrate once rather than twice.
+
+**Field mapping:** `title`, `author_name[0]`, `cover_i` → `covers.openlibrary.org/b/id/{id}-M.jpg`, `number_of_pages_median`, `subject[0]` (title-cased) → genre. `search.json` carries **no description** — the book detail sidebar (step 7) will need a second `/works/{key}.json` fetch. `googleBooksId` now holds an Open Library work key; the name is a misnomer kept so existing Firestore docs and title+author dedup keep working. Subjects are noisy (LOTR's first subject is "The Lord of the Rings"; The False Prince's is "Impersonation"), so genre rows will look odd until tuned.
+
+**`language:eng` does not work** — tested and rejected. Open Library searches *works*, which aggregate editions, so a work with any English edition matches while still displaying its original-language title. One Piece still returns 尾田栄一郎 with the filter on, and it costs ~20% of candidates.
 
 **Accuracy:** initial clean-photo pass 9/12 (75%). After the recognition work below, a harder **real-world phone re-test** (bookstore photos: angled, busy shelves, promo/movie bands) landed at **~10/21 (~48%)** — a harder set than the POC, not a regression. This ~48% is the practical ceiling; the approval flow (step 6) is what makes imperfect recognition usable.
 
@@ -229,11 +242,11 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 ```
 bookshelf_app/lib/
 ├── main.dart                        — Firebase init, dotenv, anonymous auth, ProviderScope → MainScaffold
-├── core/constants.dart              — googleBooksBaseUrl, autoAddConfidenceThreshold (0.75)
-├── models/book.dart                 — Book model, fromGoogleBooksJson, fromFirestore, toFirestore (id, googleBooksId, dateAdded, genre, pageCount)
+├── core/constants.dart              — openLibraryBaseUrl/UserAgent, bookLookupTimeout, autoAddConfidenceThreshold (0.75)
+├── models/book.dart                 — Book model, fromOpenLibraryJson, fromFirestore, toFirestore (id, googleBooksId, dateAdded, genre, pageCount)
 ├── models/pending_book.dart         — PendingBook: one queued review card (imagePath, candidates, confidence; topGuess/otherMatches/hasResults)
 ├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult (per-line text + bounding box + imageHeight + isScreenshot)
-├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText (free-text for manual search)
+├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText (free-text for manual search). Fetches Open Library; Google Books path commented out below it
 ├── services/book_repository.dart    — BookRepository: addBook (returns doc id, null if dup), addBooks (one WriteBatch for import), deleteBook, watchBooks. Dedup = same googleBooksId OR same title+author (catches different Google Books editions)
 ├── providers/recognition_provider.dart     — bookRepositoryProvider (+ RecognitionNotifier, now unused — kept in case the camera flow ever wants a single-photo notifier)
 ├── providers/import_provider.dart   — ImportNotifier: importImages routing (collects confident matches → one batched addBooks after the loop), approval queue, autoAdded list, undoAutoAdd/approveTop/rejectTop, addedCount/alreadyInLibrary/reviewCount/progress

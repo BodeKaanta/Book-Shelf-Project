@@ -23,24 +23,59 @@ class Book {
     this.pageCount,
   });
 
-  factory Book.fromGoogleBooksJson(Map<String, dynamic> json) {
-    final volumeInfo = json['volumeInfo'] as Map<String, dynamic>? ?? {};
-    final authors = volumeInfo['authors'] as List<dynamic>?;
-    final imageLinks = volumeInfo['imageLinks'] as Map<String, dynamic>?;
-    final categories = volumeInfo['categories'] as List<dynamic>?;
+  // `googleBooksId` holds an Open Library work key ("/works/OL21745884W") while
+  // Open Library is the source. Kept under the old name so existing Firestore
+  // documents and the title+author dedup keep working (#75).
+  factory Book.fromOpenLibraryJson(Map<String, dynamic> json) {
+    final authors = json['author_name'] as List<dynamic>?;
+    final coverId = json['cover_i'] as int?;
 
     return Book(
       id: '',
-      googleBooksId: json['id'] as String?,
-      title: volumeInfo['title'] as String? ?? 'Unknown Title',
+      googleBooksId: json['key'] as String?,
+      title: json['title'] as String? ?? 'Unknown Title',
       author: authors?.isNotEmpty == true ? authors!.first as String : null,
-      coverUrl: imageLinks?['thumbnail'] as String?,
-      description: volumeInfo['description'] as String?,
-      genre: categories?.isNotEmpty == true ? categories!.first as String : null,
-      pageCount: volumeInfo['pageCount'] as int?,
+      coverUrl: coverId != null
+          ? 'https://covers.openlibrary.org/b/id/$coverId-M.jpg'
+          : null,
+      // search.json carries no description — that needs a second /works fetch.
+      description: null,
+      genre: _firstSubject(json['subject'] as List<dynamic>?),
+      pageCount: json['number_of_pages_median'] as int?,
       dateAdded: DateTime.now(),
     );
   }
+
+  // Open Library subjects are noisy lowercase tags ("hard science-fiction",
+  // "sci-fi"). Home rows and the Library filter chips display this, so take the
+  // first and title-case it.
+  static String? _firstSubject(List<dynamic>? subjects) {
+    if (subjects == null || subjects.isEmpty) return null;
+    return (subjects.first as String)
+        .split(' ')
+        .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
+  }
+
+  // Google Books mapping — kept for a fast switch back if its corpus recovers.
+  // factory Book.fromGoogleBooksJson(Map<String, dynamic> json) {
+  //   final volumeInfo = json['volumeInfo'] as Map<String, dynamic>? ?? {};
+  //   final authors = volumeInfo['authors'] as List<dynamic>?;
+  //   final imageLinks = volumeInfo['imageLinks'] as Map<String, dynamic>?;
+  //   final categories = volumeInfo['categories'] as List<dynamic>?;
+  //
+  //   return Book(
+  //     id: '',
+  //     googleBooksId: json['id'] as String?,
+  //     title: volumeInfo['title'] as String? ?? 'Unknown Title',
+  //     author: authors?.isNotEmpty == true ? authors!.first as String : null,
+  //     coverUrl: imageLinks?['thumbnail'] as String?,
+  //     description: volumeInfo['description'] as String?,
+  //     genre: categories?.isNotEmpty == true ? categories!.first as String : null,
+  //     pageCount: volumeInfo['pageCount'] as int?,
+  //     dateAdded: DateTime.now(),
+  //   );
+  // }
 
   factory Book.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
