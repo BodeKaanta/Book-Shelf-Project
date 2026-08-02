@@ -3,17 +3,34 @@
 Working doc for getting the Bookedex closed beta onto Google Play. Delete once the beta is live.
 Durable build knowledge lives in CLAUDE.md → "Release Builds (Android)"; this file is the current state and the remaining steps.
 
-## State as of 30 Jul 2026
+## State as of 2 Aug 2026
 
-Done and verified on Bode's PC:
+Done and verified on Bode's PC (working copy is now `C:\dev\Book-Shelf-Project`):
 
-- Upload keystore generated, release signing wired up. A test bundle built and `keytool -printcert` confirmed `CN=Bode Kaanta, O=Bookedex` (not the debug key).
-- R8 failure fixed (`android/app/proguard-rules.pro`) — release builds now complete.
-- App icon replaced at all five densities + adaptive icon.
-- `targetSdk`/`compileSdk` 36, `minSdk` 24 — Play's recent-API requirement already satisfied.
-- Artifact produced: `build/app/outputs/bundle/release/app-release.aab`, 65.2 MB.
+- Upload keystore generated, release signing wired up. `keytool -printcert` on the bundle confirms `CN=Bode Kaanta, O=Bookedex`, not the debug key.
+- Release build **runs on device** — it initially hung at "Recognizing… 0 of N" because R8 stripped ML Kit members; fixed with `-keep` rules in `proguard-rules.pro` (#76).
+- App icon replaced at all densities + adaptive icon, source art resized to exactly **512×512** for the Play listing (#76).
+- `targetSdk`/`compileSdk` 36, `minSdk` 24 — Play's recent-API requirement satisfied.
+- Book data switched to **Open Library** (#75) after Google Books stopped returning mainstream titles. No API key needed now, so the dart-define is optional.
 
-**Not yet done:** nobody has run the minified release build on a device. See "Do this first".
+**Recognition is 7 of 20** on Margot's photo set. **#78** (query builder) should recover ~6 more and is the highest-value work before shipping — 7/20 will read as broken to a beta tester.
+
+## Keystore backup
+
+| Item | State |
+|---|---|
+| Keystore password | **Backed up** (password manager) |
+| `bookedex-upload-keystore.jks` | **NOT yet backed up** |
+
+File is `C:\Users\bodek\keys\bookedex-upload-keystore.jks`, 2,632 bytes. Copy to two locations and verify with `certutil -hashfile <path> SHA256`:
+
+```
+238e6ba69813d62b0582102c210c4a1c6778a53aecf09371d4b4cea21f240a52
+```
+
+The `.jks` is itself password-protected, so an unencrypted copy in cloud storage is an acceptable trade — the realistic risk is **losing** it, not theft. **Do not store `key.properties` beside it**: that file holds the password in plaintext and cancels out the keystore's own encryption.
+
+Loss is recoverable but slow: with Play App Signing (accept the default when Play Console offers it) Google holds the app signing key and can reset a lost *upload* key via support over several days. Opting out of Play App Signing is what makes loss unrecoverable.
 
 ## Setting up a second machine
 

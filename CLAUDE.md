@@ -6,6 +6,11 @@ Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book cove
 **App name:** Bookedex
 **Package ID:** `com.bookedex.app`
 
+## Where the code lives
+**Working copy: `C:\dev\Book-Shelf-Project`.** Moved off OneDrive in Aug 2026 — OneDrive was syncing 3.2 GB (2.9 GB of it disposable `build/` output) against 2.7 MB of real git history, paths were already 369 chars against Windows' 260 limit, and OneDrive syncing `.git/` risks index corruption. Git is the sync mechanism; OneDrive added risk and nothing else.
+
+A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App\Book-Shelf-Project` pending deletion. **Check you are in `C:\dev` before editing** — edits have landed in the wrong copy before. Note Windows' shell "Documents" is redirected into OneDrive, so `C:\Users\bodek\Documents` is a *different*, non-synced folder from the one Explorer shows.
+
 ## Team
 - **Bode** (me): sole developer
 - **Richie**: product, UX/UI design, marketing
@@ -162,6 +167,10 @@ Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Open Libr
 - **Open Library's Solr matches literally; Google Books ranked by popularity and tolerated junk.** `q=HAIL` returns Project Hail Mary #1, but `q=HAIL AUTHOR OF` returns *Hail and farewell* / *The Merchant of Venice* — junk tokens actively poison the query rather than merely diluting it. Google's ranking was silently rescuing weak queries; that mask is now gone, which is what #78 addresses. Sorting cannot substitute: `sort=editions`/`readinglog`/`rating` flood results with Macbeth and King Lear by edition count.
 
 **Confidence separation improved.** On the 20-photo run: correct matches 70–85%, incorrect 19–60% — a clean gap, versus Google's overlapping 62–90 / 0–70. Measured threshold is **0.65**, but it stays at 0.75 until #78 lands so we recalibrate once rather than twice.
+
+**Current state: 7 of 20 recognised** on Margot's set. #78 (query builder) should recover ~6 more; the rest are destroyed OCR that belongs in manual search.
+
+**Accepted known issue — high-confidence wrong match.** Blake Crouch's *Pines* matches "Wayward" (the next book in the series) at **100%**, so it auto-adds wrongly at any threshold. The photo is a Wikipedia screenshot listing the whole trilogy. Deliberately not fixed: a Wikipedia-article screenshot is a rarer shape than BookTok screenshots or real cover photos, and #78's junk filtering may drop the `en.wikipedia.org` chrome incidentally. Revisit only if beta shows it recurring.
 
 **Field mapping:** `title`, `author_name[0]`, `cover_i` → `covers.openlibrary.org/b/id/{id}-M.jpg`, `number_of_pages_median`, `subject[0]` (title-cased) → genre. `search.json` carries **no description** — the book detail sidebar (step 7) will need a second `/works/{key}.json` fetch. `googleBooksId` now holds an Open Library work key; the name is a misnomer kept so existing Firestore docs and title+author dedup keep working. Subjects are noisy (LOTR's first subject is "The Lord of the Rings"; The False Prince's is "Impersonation"), so genre rows will look odd until tuned.
 
