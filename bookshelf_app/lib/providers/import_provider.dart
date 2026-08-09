@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../core/constants.dart';
+import '../core/recognition_log.dart';
 import '../models/book.dart';
 import '../models/pending_book.dart';
 import '../services/book_recognition_service.dart';
@@ -95,6 +96,14 @@ class ImportNotifier extends StateNotifier<ImportState> {
   Future<Book?> _classify(XFile image) async {
     final ocr = await _recognition.extractTextFromImage(image);
     final result = await _booksApi.searchBooks(ocr);
+
+    logRecognition(
+      imagePath: image.path,
+      ocr: ocr,
+      query: result.query,
+      books: result.books,
+      confidence: result.confidence,
+    );
 
     final isConfident = result.confidence >= autoAddConfidenceThreshold &&
         result.books.isNotEmpty;
