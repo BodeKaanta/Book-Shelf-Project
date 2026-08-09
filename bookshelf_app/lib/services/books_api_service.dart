@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants.dart';
+import '../core/recognition_log.dart';
 import '../models/book.dart';
 import 'book_recognition_service.dart';
 
@@ -14,7 +16,7 @@ class BooksApiService {
       OcrResult ocr) async {
     if (ocr.lines.isEmpty) return (books: <Book>[], query: '', confidence: 0.0);
 
-    final query = _buildSearchQuery(ocr);
+    final query = buildSearchQuery(ocr);
     if (query.isEmpty) return (books: <Book>[], query: '', confidence: 0.0);
 
     // Apply OCR corrections first — fall back to original if corrections break the query
@@ -38,13 +40,13 @@ class BooksApiService {
     // matches the OCR better, so relaxation can never make things worse.
     final ocrTokens = ocr.lines.expand((l) => _tokens(l.text)).toList();
     if (books.isEmpty || _bestFuzzyScore(books, ocrTokens) < _fuzzyMatchThreshold) {
-      final relaxed = _firstWords(usedQuery, 3);
-      if (relaxed != usedQuery) {
-        final relaxedResult = await _fetchBooks(relaxed) ?? <Book>[];
-        if (_bestFuzzyScore(relaxedResult, ocrTokens) >
+      for (final retry in [relaxedQuery(ocr), despacedQuery(ocr)]) {
+        if (retry == null || retry.isEmpty || retry == usedQuery) continue;
+        final retried = await _fetchBooks(retry) ?? <Book>[];
+        if (_bestFuzzyScore(retried, ocrTokens) >
             _bestFuzzyScore(books, ocrTokens)) {
-          books = relaxedResult;
-          usedQuery = relaxed;
+          books = retried;
+          usedQuery = retry;
         }
       }
     }
@@ -92,10 +94,14 @@ class BooksApiService {
       response = await http
           .get(uri, headers: {'User-Agent': openLibraryUserAgent})
           .timeout(bookLookupTimeout);
-    } on Exception {
+    } on Exception catch (error) {
+      logLookupFailure(query, 'request failed: $error');
       return null;
     }
-    if (response.statusCode != 200) return null;
+    if (response.statusCode != 200) {
+      logLookupFailure(query, 'HTTP ${response.statusCode}');
+      return null;
+    }
 
     final data = json.decode(response.body) as Map<String, dynamic>;
     final docs = data['docs'] as List<dynamic>?;
@@ -103,7 +109,10 @@ class BooksApiService {
     // returns `docs`, empty. Callers distinguish null (try another query) from
     // a non-empty list, so an empty result must stay null or the retry paths
     // above are skipped.
-    if (docs == null || docs.isEmpty) return null;
+    if (docs == null || docs.isEmpty) {
+      logLookupFailure(query, 'no results');
+      return null;
+    }
 
     return docs
         .whereType<Map<String, dynamic>>()
@@ -234,40 +243,144 @@ class BooksApiService {
         );
   }
 
-  String _buildSearchQuery(OcrResult ocr) {
-    final candidates = ocr.lines
-        .where((l) => l.text.trim().length >= 4)
-        .where((l) => l.text.trim().length <= 40) // drop review blurbs / long quotes
-        .where((l) => !RegExp(r'^\d[\d:.,\s]*$').hasMatch(l.text.trim())) // pure numbers
-        .where((l) => !RegExp(r'^\d{1,2}:\d{2}').hasMatch(l.text.trim())) // timestamps "13:24 A"
-        .where((l) => !_isOcrGarbage(l.text.trim())) // mixed-case OCR noise like "NoTEB O OK"
-        .where((l) => !_isPromotionalLine(l.text.trim())) // award/promo/bestseller-band text
-        .where((l) => !_isGenericTagline(l.text.trim())) // "A NOVEL", "A MEMOIR"
-        .where((l) => !_isPublisher(l.text.trim())) // publisher name lines like "BLOOMSBURY"
-        .where((l) => !_isAttribution(l.text.trim())) // "— Dallas Morning News"
-        .where((l) => !_isEditionInfo(l.text.trim())) // "10th Anniversary Edition", "Book 2 of"
-        .where((l) => !ocr.isScreenshot || !_isSocialUiLine(l.text.trim())) // social UI, screenshots only
-        .toList();
+  static const int _maxQueryLines = 3;
 
-    if (candidates.isEmpty) {
-      final fallback = ocr.rawText.trim();
-      return fallback.length > 120 ? fallback.substring(0, 120) : fallback;
+  // The lines that become the query, in the order they appear on the cover.
+  List<OcrLine> _selectLines(OcrResult ocr, int limit) {
+    // Cover text repeats — spine plus front, or OCR reading one band twice.
+    // Deduping frees the slot for a line that says something new ("EMILY EMILY
+    // EMILY" was a whole query). Keep the *least fragmented* reading: letter-
+    // spaced type comes back in pieces ("TRAN SFOR MED") while the same words
+    // often survive intact elsewhere on the cover ("Transformed"), and only the
+    // intact one retrieves anything.
+    final byText = <String, OcrLine>{};
+    for (final line in ocr.lines) {
+      if (!_isUsableLine(line, ocr)) continue;
+      final key = _normalize(line.text.trim());
+      final kept = byText[key];
+      if (kept == null || _fragmentCount(line) < _fragmentCount(kept)) {
+        byText[key] = line;
+      }
     }
+    // Map preserves insertion order and replacing a value keeps its original
+    // position, so the index tiebreak below still follows OCR order.
+    final candidates = byText.values.toList();
+    if (candidates.isEmpty) return const [];
 
     final maxLineHeight = candidates
         .map((l) => l.boundingBox.height)
         .fold<double>(0, (a, b) => a > b ? a : b);
 
-    candidates.sort((a, b) => _lineScore(b, ocr, maxLineHeight)
-        .compareTo(_lineScore(a, ocr, maxLineHeight)));
+    final ranked = [
+      for (var i = 0; i < candidates.length; i++)
+        (
+          line: candidates[i],
+          index: i,
+          score: _lineScore(candidates[i], ocr, maxLineHeight),
+        ),
+    ].where((e) => e.score > 0).toList()
+      // Every ALL-CAPS line scores exactly 1.0, so ties are the common case and
+      // List.sort is not stable — without the index tiebreak the same photo can
+      // build a different query on each run.
+      ..sort((a, b) {
+        final byScore = b.score.compareTo(a.score);
+        return byScore != 0 ? byScore : a.index.compareTo(b.index);
+      });
 
-    final joined = candidates.take(3).map((l) => l.text.trim()).join(' ');
-    final query = _collapseSpacedLetters(joined);
-    return query.length > 120 ? query.substring(0, 120) : query;
+    // Back into reading order. A title split over several lines ("THE | LORD |
+    // OF THE | RINGS") is only a title in the order it was printed; emitting it
+    // in score order also made the _firstWords retry below relax to arbitrary
+    // words rather than to the leading title words it documents.
+    return [for (final e in ranked.take(limit)) e.line]
+      ..sort((a, b) => a.boundingBox.top.compareTo(b.boundingBox.top));
   }
 
-  String _firstWords(String query, int n) =>
-      query.split(RegExp(r'\s+')).take(n).join(' ');
+  int _fragmentCount(OcrLine line) =>
+      line.text.trim().split(RegExp(r'\s+')).length;
+
+  @visibleForTesting
+  String buildSearchQuery(OcrResult ocr) {
+    final selected = _selectLines(ocr, _maxQueryLines);
+    if (selected.isEmpty) {
+      final fallback = ocr.rawText.trim();
+      return _capped(fallback);
+    }
+    return _capped(_joinLines(selected.map((l) => l.text.trim())));
+  }
+
+  // Open Library's Solr effectively ANDs the terms, so one junk line zeroes the
+  // result set. Dropping the weakest selected line is the retry: it relaxes by
+  // whole lines rather than by word count, which used to cut mid-phrase
+  // ("ITALO CALVINO" -> "ITALO", "Transformed Remi Adeleke" -> "ANAVY SEAL'S
+  // UNLIKELY") and threw away the very words that identify the book.
+  @visibleForTesting
+  String? relaxedQuery(OcrResult ocr) {
+    final selected = _selectLines(ocr, _maxQueryLines - 1);
+    if (selected.isEmpty) return null;
+    final query = _capped(_joinLines(selected.map((l) => l.text.trim())));
+    return query == buildSearchQuery(ocr) ? null : query;
+  }
+
+  // Collapse per line, never across the join: a line starting "A Saga of…"
+  // would otherwise glue its "A" onto the previous line's last word
+  // ("THE HOUSE OF" + "A SAGA" -> "THE HOUSE OFA SAGA").
+  String _joinLines(Iterable<String> lines) =>
+      lines.map(_collapseSpacedLetters).join(' ');
+
+  // Letter-spaced cover type ("NoTEB OO K") reaches us as fragments that no
+  // filter can repair, and the fragments retrieve nothing. Gluing the leading
+  // line back into one word gives the retry a real title to search for. Only
+  // ever a retry: searchBooks keeps it if it matches the OCR better than the
+  // primary query, so a wrong glue costs a request and nothing else.
+  @visibleForTesting
+  String? despacedQuery(OcrResult ocr) {
+    final selected = _selectLines(ocr, _maxQueryLines);
+    if (selected.isEmpty) return null;
+    final glued = selected.first.text.trim().replaceAll(RegExp(r'\s+'), '');
+    final query = _capped(
+        _joinLines([glued, for (final l in selected.skip(1)) l.text.trim()]));
+    return query == buildSearchQuery(ocr) ? null : query;
+  }
+
+  String _capped(String query) =>
+      query.length > 120 ? query.substring(0, 120) : query;
+
+  bool _isUsableLine(OcrLine line, OcrResult ocr) {
+    final text = line.text.trim();
+    if (_letterCount(text) < 4) return false; // "J.RR.", "#1", "l04", "TD D"
+    if (text.length > 40) return false; // review blurbs / long quotes
+    if (_isRotated(line)) return false; // spine of a neighbouring book
+    if (RegExp(r'^\d[\d:.,\s]*$').hasMatch(text)) return false; // pure numbers
+    if (RegExp(r'^\d{1,2}:\d{2}').hasMatch(text)) return false; // "13:24 M"
+    if (_isReviewQuote(text)) return false;
+    if (_isOcrGarbage(text)) return false;
+    if (_isPromotionalLine(text)) return false;
+    if (_isGenericTagline(text)) return false;
+    if (_isPublisher(text)) return false;
+    if (_isAttribution(text)) return false;
+    if (_isEditionInfo(text)) return false;
+    if (_isCreditLine(text)) return false;
+    if (ocr.isScreenshot && _isSocialUiLine(text)) return false;
+    return true;
+  }
+
+  int _letterCount(String text) => RegExp(r'[A-Za-z]').allMatches(text).length;
+
+  // ML Kit reports rotated text with a box taller than it is wide — the spines
+  // of neighbouring books on a shelf, and vertical cover bands. Horizontal
+  // cover text of four or more characters is always wider than it is tall.
+  bool _isRotated(OcrLine line) =>
+      line.boundingBox.height > line.boundingBox.width;
+
+  // Cover furniture ('"VERY, VERY SCARY !"-WIRED'). Titles carry no quote
+  // marks, so the mark itself is the signal — anchoring to the start of the
+  // line misses quotes OCR splits mid-sentence.
+  bool _isReviewQuote(String line) => RegExp(r'["“”„]').hasMatch(line);
+
+  // "EDITED BY …", "ILLUSTRATED BY …" — credits, never the title.
+  bool _isCreditLine(String line) => RegExp(
+        r'\b(EDITED|ILLUSTRATED|TRANSLATED|FOREWORD|AFTERWORD|PHOTOGRAPHS)\s+BY\b',
+      ).hasMatch(line.toUpperCase());
 
   // Cover letter-spacing makes OCR split a word into single letters
   // ("NoTEB O O K"). Glue standalone letters onto the preceding word so the
@@ -292,12 +405,19 @@ class BooksApiService {
   bool _isSocialUiLine(String line) {
     if (RegExp(r'^[@#]\w').hasMatch(line)) return true;
     if (RegExp(r'^\d+([.,]\d+)?[KMB]$').hasMatch(line)) return true; // "1.2M", "45K"
-    const uiStrings = [
-      'for you', 'following', 'add comment', 'add a comment', 'reply',
-      'original sound', 'log in', 'sign up', 'send message', 'view profile',
-    ];
-    final lower = line.toLowerCase();
-    return uiStrings.any((s) => lower == s);
+    // Article/source chrome: "en.wikipedia.org"
+    if (RegExp(r'\b\w+\.(com|org|net|edu|gov|io)\b').hasMatch(line.toLowerCase())) {
+      return true;
+    }
+    // Compared normalized so OCR's trailing punctuation ("Add comment..")
+    // still matches.
+    const uiStrings = {
+      'foryou', 'following', 'follow', 'addcomment', 'addacomment', 'reply',
+      'originalsound', 'login', 'signup', 'sendmessage', 'viewprofile',
+      'share', 'save', 'home', 'search', 'notifications', 'activity', 'visit',
+      'goodreads', 'booktok', 'bookstagram', 'learnmore', 'seemore',
+    };
+    return uiStrings.contains(_normalize(line));
   }
 
   // Strip to letters only so OCR word-splitting ("BLOO M S BURY", "A NO VEL")
@@ -319,13 +439,14 @@ class BooksApiService {
   // Edition/series banner text ("10th Anniversary Edition", "Book 2 of the …",
   // "Volume 3") — never a search term. Kept narrow (needs an edition keyword or
   // a number) so real titles like "Book of the Dead" aren't dropped.
+  // Normalized, because OCR splits these too ("mTH ANNIVERSARYONE-VOLUMEEDITION").
   bool _isEditionInfo(String line) {
+    final normalized = _normalize(line);
+    if (normalized.contains('anniversary')) return true;
+    if (normalized.contains('edition')) return true;
+    if (normalized.endsWith('series')) return true; // "SOUTHERN REACH SERIES"
     final upper = line.toUpperCase();
-    return upper.contains('ANNIVERSARY EDITION') ||
-        RegExp(r'\b\d+(ST|ND|RD|TH)\s+ANNIVERSARY\b').hasMatch(upper) ||
-        RegExp(r'\b(DELUXE|SPECIAL|COLLECTOR.?S|REVISED|EXPANDED|ILLUSTRATED)\s+EDITION\b')
-            .hasMatch(upper) ||
-        RegExp(r'\bBOOK\s+\d+\s+OF\b').hasMatch(upper) ||
+    return RegExp(r'\bBOOK\s+\d+\s+OF\b').hasMatch(upper) ||
         RegExp(r'\bVOL(?:UME|\.)?\s*\d+\b').hasMatch(upper);
   }
 
@@ -339,17 +460,32 @@ class BooksApiService {
     return publishers.contains(_normalize(line));
   }
 
+  // Matched against the letters-only form of the line, because OCR splits these
+  // bands unpredictably — "BES TSELLER", "NATIONAL BESTSELL ER", "#1 NE W YO RK
+  // TIME S BES TSELLER" all normalize back onto the same keywords, and the
+  // manglings cannot be enumerated.
+  static const _promoKeywords = [
+    'longlisted', 'shortlisted', 'prize', 'award', 'winner', 'finalist',
+    'bestseller', 'bestselling', 'seller', 'booker', 'pulitzer',
+    'introduction', 'newyorktimes', 'sundaytimes', 'usatoday',
+    'readwith', 'bookclub', 'authorof',
+    // Film/TV adaptation banners
+    'motionpicture', 'majormotion', 'netflix', 'soontobe', 'nowamajor',
+  ];
+
+  // Book-club endorsements print the brand on its own line, so OCR leaves an
+  // orphan ("READ WITH" / "JENNA") once the band line is dropped. Matched whole
+  // -line rather than by substring, so a real title keeps its name.
+  static const _bookClubBrands = {
+    'jenna', 'reese', 'oprah', 'readwithjenna', 'reesesbookclub',
+  };
+
   bool _isPromotionalLine(String line) {
-    final upper = line.toUpperCase();
-    const keywords = [
-      'LONGLISTED', 'SHORTLISTED', 'PRIZE', 'AWARD', 'WINNER',
-      'BESTSELLER', 'BESTSELLING', 'FINALIST', 'BOOKER', 'PULITZER',
-      'INTRODUCTION', 'NEW YORK TIMES', 'SUNDAY TIMES', 'BEST SELLER',
-      'NATIONAL BESTSELLER',
-      // Film/TV adaptation banners
-      'MOTION PICTURE', 'MAJOR MOTION', 'NETFLIX', 'SOON TO BE', 'NOW A MAJOR',
-    ];
-    return keywords.any((k) => upper.contains(k));
+    // A rank marker is never part of a title: "#1 NEW YO", "THE #L NEW YORK…"
+    if (RegExp(r'#\s*[1lLiI]').hasMatch(line)) return true;
+    final normalized = _normalize(line);
+    if (_bookClubBrands.contains(normalized)) return true;
+    return _promoKeywords.any(normalized.contains);
   }
 
   // Filters lines where more than 25% of words have suspicious mixed casing
@@ -362,6 +498,10 @@ class BooksApiService {
   }
 
   bool _isSuspiciousWord(String word) {
+    // Checked before the all-caps shortcut below: cover garbage is usually ALL
+    // CAPS ("20SE GcODE"), so it used to dodge rejection here and then score as
+    // a title in _baseTextScore.
+    if (_isImplausibleWord(word)) return true;
     if (word == word.toUpperCase()) return false;
     if (word == word.toLowerCase()) return false;
 
@@ -377,6 +517,15 @@ class BooksApiService {
         s == s.toUpperCase() ||
         (s[0] == s[0].toUpperCase() &&
             s.substring(1) == s.substring(1).toLowerCase()));
+  }
+
+  // Digits fused into a word ("20SE"), or a letter run with no vowel at all —
+  // OCR noise whatever the casing. No real title word looks like either.
+  bool _isImplausibleWord(String word) {
+    final letters = word.replaceAll(RegExp(r'[^A-Za-z]'), '');
+    if (letters.length < 3) return false;
+    if (RegExp(r'\d').hasMatch(word)) return true;
+    return !RegExp(r'[AEIOUYaeiouy]').hasMatch(letters);
   }
 
   double _lineScore(OcrLine line, OcrResult ocr, double maxLineHeight) {
@@ -427,9 +576,12 @@ class BooksApiService {
             w[0] == w[0].toUpperCase() &&
             w.substring(1) == w.substring(1).toLowerCase())
         .length;
-    final titleScore = words.length >= 2
-        ? (titleCaseWords / words.length) * 0.65 * lengthPenalty
-        : 0.0;
+    // Single words count too: one-word titles ("Unbecoming", "Overstory",
+    // "Authority") have a low caps ratio, so gating this at two words left them
+    // scoring ~0.1 and losing to any title-cased junk line.
+    final titleScore = words.isEmpty
+        ? 0.0
+        : (titleCaseWords / words.length) * 0.65 * lengthPenalty;
 
     return capsScore > titleScore ? capsScore : titleScore;
   }
