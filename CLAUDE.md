@@ -21,8 +21,8 @@ A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App
 |---|---|
 | Frontend | Flutter / Dart |
 | Backend | Firebase (Firestore, Auth) — Cloud Storage not needed until Phase 2 |
-| Book Recognition | Google ML Kit on-device OCR → text → Open Library search |
-| Book Data | **Open Library** (primary since #75). Google Books is commented out, not deleted — its corpus stopped returning mainstream titles |
+| Book Recognition | Google ML Kit on-device OCR → text → Google Books search |
+| Book Data | **Google Books** (primary; recovered in #81). **Open Library** stays live as a fallback, used only on transport failure — timeout/429/5xx |
 | State Management | Riverpod |
 | Notifications | In-app prompts only (NO push notifications in MVP) |
 | Monetization | Google Play Billing (Pro tier), affiliate links (Phase 3) |
@@ -133,8 +133,8 @@ Then check the Build Order section to see the current step. The open issues tell
 - Cloud Storage not used in MVP — book cover art is stored as Google Books API URLs in Firestore, no file storage needed. (Screenshot import doesn't change this: screenshots are matched to a Google Books result and only the cover URL is stored.) Revisit in Phase 2 only if we ever need to keep the user's original photo as a fallback cover.
 
 ## API Keys & Secrets
-- **No API key is currently needed.** Open Library is keyless (#75), so `.env` and the dart-define are optional and `main()`'s key assert is commented out. `.env` is kept for a fast switch back to Google Books.
-- **If Google Books is ever re-enabled, its key is REQUIRED** — keyless calls return HTTP 429 (Google attributes them to a shared anonymous quota pool that is permanently exhausted; learned the hard way in #48/#50, and re-confirmed in #75). The key lives in `bookshelf_app/.env` (gitignored) and is injected at build time, not bundled: run with `flutter run --dart-define-from-file=.env`, read in code via `String.fromEnvironment('GOOGLE_BOOKS_API_KEY')`.
+- **The Google Books API key is REQUIRED again (#81).** Keyless calls return HTTP 429 — Google attributes them to a shared anonymous quota pool that is permanently exhausted (learned the hard way in #48/#50, re-confirmed in #75). The key lives in `bookshelf_app/.env` (gitignored) and is injected at build time, not bundled: run with `flutter run --dart-define-from-file=.env`, read in code via `String.fromEnvironment('GOOGLE_BOOKS_API_KEY')`. `main()`'s assert is restored, so a **debug** build without the flag fails loudly at startup.
+- The Open Library fallback is keyless, so it keeps working without the flag — which means a keyless build degrades to the fallback rather than failing outright. Do not rely on that.
 - **Honest threat model:** any key shipped in a client app is extractable — dart-define is obfuscation, not protection. The real security control is console-side: in Google Cloud Console, restrict the key to the Books API only and cap its daily quota. Books API is free with no billing attached, so a leaked key can only waste quota — no money or data at risk.
 - The Firebase keys in `firebase_options.dart` / `google-services.json` are identifiers, not secrets — safe to commit. Data access is enforced by Firestore security rules, not by hiding these keys.
 - **Before public launch:** enable Firebase App Check, and add Android package name + SHA-1 restrictions to the Firebase API keys AND the Books API key in Google Cloud Console.
@@ -144,7 +144,7 @@ Then check the Build Order section to see the current step. The open issues tell
 ```
 flutter build appbundle --dart-define-from-file=.env
 ```
-The dart-define is **currently optional** — Open Library needs no key (#75). Keep using it out of habit: it costs nothing, and if Google Books is ever re-enabled it becomes mandatory again. The trap it used to hide is worth remembering: a keyless Google Books build failed *silently*, because `main()`'s assert is stripped in release, so recognition simply never worked with no error at all.
+The dart-define is **mandatory again (#81)** — Google Books is primary and needs the key. The trap: `main()`'s assert is **stripped in release**, so a keyless release build fails *silently*. Since #81 it fails quietly in a new way — every lookup 429s and falls through to the Open Library fallback, so recognition still half-works and the missing key is even harder to spot. Always verify the flag was passed.
 
 **Signing:** upload keystore at `C:\Users\bodek\keys\bookedex-upload-keystore.jks` (alias `upload`, RSA 2048, valid to Dec 2053), deliberately **outside the repo**. `android/key.properties` holds the path + passwords; it and `*.jks` / `*.keystore` are gitignored. `build.gradle.kts` falls back to debug signing when `key.properties` is absent, so a fresh clone still configures and `flutter run` works — meaning **a machine without those files silently produces a debug-signed bundle that Play will reject.** Verify with `keytool -printcert -jarfile <aab>`; it must show `CN=Bode Kaanta`, not `CN=Android Debug`.
 
@@ -157,28 +157,52 @@ The dart-define is **currently optional** — Open Library needs no key (#75). K
 **Play requirements already met:** `targetSdk`/`compileSdk` 36, `minSdk` 24, `applicationId` `com.bookedex.app`, label "Bookedex". The **store-listing** icon must be exactly 512×512 — the source art is 513×513 and will be rejected until resized.
 
 ## Recognition Status (as of Aug 2026)
-Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Open Library search** → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
+Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Google Books search** (Open Library on transport failure) → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
 
-### Data source switched to Open Library (#75, Aug 2026)
-**Google Books stopped returning mainstream commercial books.** `isbn:9780593135204` (Project Hail Mary) and `isbn:9780553418026` (The Martian) both return `totalItems: 0`; `q=harry potter` returns academic commentary and no Rowling; every query returns exactly `totalItems: 300`. Ruled out as causes: an invalid key (a deliberately bad key returns HTTP 400 "API key not valid"; ours returns 200 with valid JSON), URL/protocol formatting (those produce 400s, not parsed volumes), and quota (keyless 429s, keyed requests succeed). `isbn:` is an exact index lookup, so this is not a query-builder problem. Cause unknown and possibly reversible — hence Google Books is commented out rather than deleted.
+### Data source: Google Books primary, Open Library fallback (#81, Aug 2026)
+**Google Books broke, then recovered.** In #75 it stopped returning mainstream commercial books — `isbn:9780593135204` (Project Hail Mary) and `isbn:9780553418026` (The Martian) both returned `totalItems: 0`, and `q=harry potter` returned academic commentary with no Rowling. Ruled out at the time: an invalid key (a bad key returns HTTP 400; ours returned 200 with valid JSON), URL formatting, and quota. We switched to Open Library rather than delete the Google path. By #81 all three symptoms were gone. **The cause was never identified — assume it can recur.**
 
-**Two behavioural differences that matter:**
-- **Open Library returns `docs: []` on a miss; Google Books omitted `items` entirely.** Callers distinguish null (try another query) from results, so `_fetchBooks` must map empty → null or the retry paths are silently skipped.
-- **Open Library's Solr matches literally; Google Books ranked by popularity and tolerated junk.** `q=HAIL` returns Project Hail Mary #1, but `q=HAIL AUTHOR OF` returns *Hail and farewell* / *The Merchant of Venice* — junk tokens actively poison the query rather than merely diluting it. Google's ranking was silently rescuing weak queries; that mask is now gone, which is what #78 addresses. Sorting cannot substitute: `sort=editions`/`readinglog`/`rating` flood results with Macbeth and King Lear by edition count.
+**Open Library stays live as the fallback**, not commented out. `_fetchBooks` tries Google Books and falls back only on **transport failure — timeout, 429, or 5xx**. Deliberately *not* on other 4xx, and *not* on an empty result set:
+- An empty result is a real answer ("no such book"). Falling back on it would double request volume on exactly the photos that already fail.
+- A 400/403 means we asked wrongly or the key is bad. Quietly rerouting every request would hide that indefinitely.
+- **This fallback would not have caught #75.** Google Books returned HTTP 200 with valid JSON throughout; only the corpus was useless. Detecting that needs a known-answer probe (does `isbn:9780593135204` still return Project Hail Mary?). Not built — the manual switch remains the real safety net.
 
-**Confidence separation improved.** On the 20-photo run: correct matches 70–85%, incorrect 19–60% — a clean gap, versus Google's overlapping 62–90 / 0–70. Measured threshold is **0.65**, but it stays at 0.75 until #78 lands so we recalibrate once rather than twice.
+**Why Google Books wins here:** 16/20 recognised versus Open Library's 13/20 on the same photos. Popularity ranking recovers queries literal matching cannot — `PROUEOT HAIL` → Project Hail Mary, `SRUEL PRUNCE HOLLI` → The Cruel Prince, both previously written off as destroyed OCR. It also returns `description` inline (Open Library's `search.json` does not, which would have cost step 7 a second `/works/{key}.json` fetch per book).
 
-**Current state: 7 of 20 recognised** on Margot's set. #78 (query builder) should recover ~6 more; the rest are destroyed OCR that belongs in manual search.
+**Covers — the other reason.** Open Library carries sparse duplicate *work* records whose titles are the **plainest**, so they won the #52 fuzzy rerank and lost the cover art. Castle and Invisible Cities both resolved to records with one edition and no image anywhere (`/b/olid/{key}-L.jpg` 404s too). Not fixable app-side: making the rerank prefer covered candidates selects *Creepy Castle* by a different John S. Goodall — a wrong book instead of a cover-less one. On Google Books every book in the 20-photo set has a cover.
 
-**Accepted known issue — high-confidence wrong match.** Blake Crouch's *Pines* matches "Wayward" (the next book in the series) at **100%**, so it auto-adds wrongly at any threshold. The photo is a Wikipedia screenshot listing the whole trilogy. Deliberately not fixed: a Wikipedia-article screenshot is a rarer shape than BookTok screenshots or real cover photos, and #78's junk filtering may drop the `en.wikipedia.org` chrome incidentally. Revisit only if beta shows it recurring.
+**Cover URL — do not use `imageLinks.thumbnail` verbatim.** It is only **128px** wide: narrower than a library grid tile (~325px on a 1080×2400 device) and blurrier than the Open Library covers it replaced. `Book.googleCoverUrl` appends `&fife=w600` for a 600×900 rendition of the same image — server-side resolution selection, no crop and no magnification, despite what the `zoom`/`fife` naming suggests — and strips `&edge=curl`, which paints a fake page-curl over the artwork. 600px leaves headroom for the step-7 detail sidebar: `coverUrl` is frozen per book in Firestore at add time, so going smaller means a migration later. `library_screen` decodes at `cacheWidth: 400` so 600px sources don't hold ~2MB each and thrash the 100MB image cache.
 
-**Field mapping:** `title`, `author_name[0]`, `cover_i` → `covers.openlibrary.org/b/id/{id}-M.jpg`, `number_of_pages_median`, `subject[0]` (title-cased) → genre. `search.json` carries **no description** — the book detail sidebar (step 7) will need a second `/works/{key}.json` fetch. `googleBooksId` now holds an Open Library work key; the name is a misnomer kept so existing Firestore docs and title+author dedup keep working. Subjects are noisy (LOTR's first subject is "The Lord of the Rings"; The False Prince's is "Impersonation"), so genre rows will look odd until tuned.
+**Two behavioural differences between the APIs:**
+- Open Library returns `docs: []` on a miss where Google Books omits `items` entirely. Both must map to "no results", or the retry paths are silently skipped.
+- **Open Library's Solr matches literally; Google Books ranks by popularity and tolerates junk.** `q=HAIL` returns Project Hail Mary #1, but `q=HAIL AUTHOR OF` returns *Hail and farewell*. Junk tokens poison an Open Library query rather than merely diluting it — Google's ranking was silently rescuing weak line selection, which is what #78 fixed properly. Sorting cannot substitute: `sort=editions`/`readinglog`/`rating` flood results with Macbeth and King Lear by edition count.
 
-**`language:eng` does not work** — tested and rejected. Open Library searches *works*, which aggregate editions, so a work with any English edition matches while still displaying its original-language title. One Piece still returns 尾田栄一郎 with the filter on, and it costs ~20% of candidates.
+**Open Library stalls under burst load.** 20 rapid requests timed out 20/20 in testing, and a 20-photo import is exactly that pattern. A stalled request is currently recorded as a book we couldn't read — tracked in #82.
 
-**Accuracy:** initial clean-photo pass 9/12 (75%). After the recognition work below, a harder **real-world phone re-test** (bookstore photos: angled, busy shelves, promo/movie bands) landed at **~10/21 (~48%)** — a harder set than the POC, not a regression. This ~48% is the practical ceiling; the approval flow (step 6) is what makes imperfect recognition usable.
+**Known issue, now caught by the approval flow.** Blake Crouch's *Pines* (a Wikipedia screenshot listing the whole trilogy) still matches *Wayward*, the next book in the series. On Open Library it scored **100%** and auto-added wrongly at any threshold. On Google Books it scores **70%**, so it lands in the review queue with the correct *Pines* visible under "See other matches" — the intended behaviour. Note this is a side effect of the confidence bug below, not a fix; whoever repairs the scorer must confirm Pines stays below threshold.
 
-**The 21-photo test set is Margot's own collection** — every accuracy and confidence number above comes from real target-user photos, which is why ~48% is treated as the honest ceiling rather than something to tune away.
+**Field mapping — Google Books:** `volumeInfo.title`, `authors[0]`, `imageLinks.thumbnail` → `Book.googleCoverUrl`, `description`, `categories[0]` → genre, `pageCount`. `googleBooksId` holds a real Google Books volume id again. Existing Firestore docs still hold Open Library work keys from the #75 era; dedup is title+author so both coexist, and old docs keep their old `coverUrl`.
+
+**Field mapping — Open Library** (fallback path only): `title`, `author_name[0]`, `cover_i` → `covers.openlibrary.org/b/id/{id}-M.jpg`, `number_of_pages_median`, `subject[0]` (title-cased) → genre. No description. Subjects are noisy (LOTR's first subject is "The Lord of the Rings"; The False Prince's is "Impersonation"). `-M` caps at 180px; `-L` gives ~331×500 if that path ever matters visually.
+
+**`language:eng` does not work on Open Library** — tested and rejected. It searches *works*, which aggregate editions, so a work with any English edition matches while still displaying its original-language title. One Piece still returns 尾田栄一郎 with the filter on, and it costs ~20% of candidates.
+
+### Accuracy — Margot's 20-photo set
+**The test set is Margot's own collection**, measured on the physical device. Every number here comes from real target-user photos, which is why the failures are treated as an honest ceiling rather than something to tune away.
+
+| Stage | Recognised |
+|---|---|
+| Open Library + pre-#78 query builder | 7/20 |
+| Open Library + #78 query builder | 13/20 |
+| **Google Books + #78 query builder (#81)** | **16/20** |
+
+Earlier figures, different sets: initial clean-photo pass 9/12; a harder real-world re-test on 21 bookstore photos (angled, busy shelves, promo bands) landed ~10/21.
+
+**The 4 still failing, and why none is a query-builder problem:**
+- *Pines* — see above; wrong but correctly routed to review.
+- *House of Government* — a bookstore **shelf** photo: 50 OCR lines from ~4 different books. A fundamentally different problem from a single cover.
+- *I Cheerfully Refuse* — `AVELL Cheerf Retuse`. Destroyed OCR.
+- *Monk & Robot omnibus* — matches book 1 (*A Psalm for the Wild-Built*) because the query picked up a blurb's trailing title reference (`-SARAH GAILEY on` / `A Psalm for the Wild-Built`). #78 strips quote bodies but not a blurb's cited title.
 
 **Key constraint — OCR can't be improved app-side:** ML Kit's text model is BUNDLED (`com.google.mlkit:text-recognition:16.0.1`), identical across plugin versions and devices — NOT served via Play Services. Bumping the plugin (tried & closed in #56) doesn't change it. The physical device (arm64) reads worse than the emulator (x86_64) on the same model, so **always validate recognition on the physical device — the emulator flatters results.**
 
@@ -187,7 +211,11 @@ Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Open Libr
 - #52 — fuzzy title matching: rerank candidates by normalized-Levenshtein similarity of title+author to the OCR (title 60% / author 40%); reorders only above a 0.6 threshold
 - #55 — query-builder junk filtering (taglines like "A NOVEL", publishers, review attributions, bestseller bands), letter-collapse ("NoTEB O O K"→"NoTEBOOK"), leading-operator stripping, and match-aware relaxation (retry with leading words when nothing matches the OCR)
 - #60 — drop edition/series ("10th Anniversary Edition", "Book 2 of the…") and film/TV adaptation banners
+- #78 — **rework of line selection and filtering; 7/20 → 13/20.** Details in "Query builder logic" below. The two findings worth remembering: lines are joined in **reading order**, not score order (a title split over four lines is only a title in the order it was printed), and a bounding box **taller than it is wide** is rotated text — a neighbouring book's spine on a shelf photo, which is what `EMILY EMILY EMILY` and Authority's `"VERY, VERY SCARY !"-WIRED` actually were.
+- #81 — data source back to Google Books; 13/20 → 16/20.
 - ⛔ Reverted: size-weighting for ALL photos (#58) regressed accuracy 10→7 — size doesn't reliably track the title on real covers. Size weighting stays screenshot-only.
+
+**Recognition is testable without a device.** `test/fixtures/ocr_fixtures.dart` holds all 20 photos' OCR captured verbatim from the physical device (line text + bounding boxes + screenshot flag), and `test/books_api_service_test.dart` asserts query construction against it. The query builder is a pure function, so a change can be checked in seconds instead of a full device run. Regenerate fixtures from the debug-only `[REC]` logging in `core/recognition_log.dart` — capture losslessly with `adb logcat -v brief > file` rather than reading the terminal, since logcat's ring buffer rolls mid-import.
 
 **Genuinely-hard cases → manual fallback (step 6), not more tuning:** destroyed OCR (e.g. "ANDY WEIR"→"WET R"), heavily stylized/embossed title fonts, common titles with no author captured.
 
@@ -218,13 +246,15 @@ Richie's Figma prototype: https://www.figma.com/make/QjDuOmFO2heo8XJkhrGesw/Desi
 ## Approval Screen Design Notes (Step 6 — Done)
 Tinder-style swipe review card, only shown for books the system is uncertain about. Built in `screens/approval_screen.dart` (+ `manual_search_screen.dart`, `import_screen.dart`), driven by `providers/import_provider.dart`.
 
-**Confidence threshold — 75% (provisional):**
+**Confidence threshold — 75%, re-confirmed on Google Books (#81):**
 - ≥75% → auto-save silently
 - <75% OR no confident match → approval queue
 
-**Confidence scoring (implemented, `BooksApiService._confidence`):** `0.7 × topMatch + 0.3 × margin`, where topMatch is the #52 fuzzy similarity of the best result to the OCR and margin is how clearly it beats the runner-up (ambiguous common titles score lower). This *superseded* the original "gap between query scores" idea.
+**Confidence scoring (`BooksApiService._confidence`):** `0.7 × topMatch + 0.3 × margin`, where topMatch is the #52 fuzzy similarity of the best result to the OCR and margin is how clearly it beats the runner-up. This *superseded* the original "gap between query scores" idea.
 
-**Calibration — already done on real target-user photos.** The 21-photo phone set **is Margot's own collection**, so 0.75 is calibrated against real target-user data, not synthetic or developer-picked photos. There is no pending "recalibrate on Margot's photos" task. On that set correct matches scored 62–90% and incorrect ones 0–70%: the separation is genuinely weak, and that is a property of the confidence formula itself, not an artifact of an unrepresentative test set — so re-running the same photos won't improve it. 0.75 is the best compromise found. Only two things would move it: a better scorer, or beta data at a much larger N. Undo safety net exists in the notifier (`undoAutoAdd`, `deleteBook`); batch import surfaces a summary popup instead of per-book toasts.
+**⚠️ The margin term is broken on Google Books — see #83.** Margin is measured against the runner-up whatever it is, and Google Books returns *several editions of the same book* (`Overstory Richard PoWers` returns The Overstory three times). Margin collapses to 0 and confidence is capped at `0.7 × topMatch` ≈ 0.70. Five correct books landed on exactly 0.70 for this reason. Multiple editions of the right book is evidence of confidence, not ambiguity. The fix is to measure margin against the best *genuinely different* book — but note Pines and the Monk & Robot omnibus score low **because** of this bug, so whoever fixes it must confirm both stay below threshold.
+
+**Calibration — done on real target-user photos, twice.** The 20-photo set **is Margot's own collection**. On Google Books (#81): correct 0.57–0.87, incorrect 0.53–0.74. **0.75 is the lowest value that excludes the wrong Monk & Robot match at 0.74**, so it is the right threshold on this data and was left unchanged. The cost is that only 5 of 16 correct books auto-add — that is #83's margin bug, not a threshold problem, and lowering the threshold to compensate would admit a wrong book. For reference, #78 on Open Library measured a clean 0.65 split (correct 0.68–1.00, incorrect 0.00–0.60); the distribution is a property of the data source, so it must be re-measured after any source change. Undo safety net exists in the notifier (`undoAutoAdd`, `deleteBook`); batch import surfaces a summary popup instead of per-book toasts.
 
 **Import flow (#45):** Import tab → `ImportScreen` "Choose Photos" → `pickMultiImage` → `importImages` routing (progress loader "Recognizing X of N…") → summary popup ("N added · M to review", "Review"/"Later") → approval queue.
 
@@ -243,7 +273,7 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
 
 **Ideas not yet created:**
-- Edition-picker / custom cover — let the user choose among a book's Google Books editions so the cover matches their physical copy (no storage needed); true custom-photo covers need Cloud Storage = Phase 2.
+- **Change cover — a post-add feature, part of step 7.** Bode's design: the book detail pop-out carries a 3-dot menu, and one option is "Change cover", which offers the other Google Books editions of that book so the cover matches the user's physical copy. **Deliberately not part of import** — whatever cover recognition picks is fine at add time, and we advertise that it can be changed afterwards. This is why import can dedupe duplicate editions freely (#83): the editions are re-queried on demand by title+author when the user asks, never carried through the review queue or stored. `coverUrl` is a single Firestore field, so changing the cover is one overwrite. True custom-photo covers are different — they need Cloud Storage = Phase 2.
 - `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain.
 - Full "delight" import loading animation/game — Phase 2 polish.
 
@@ -251,11 +281,12 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 ```
 bookshelf_app/lib/
 ├── main.dart                        — Firebase init, dotenv, anonymous auth, ProviderScope → MainScaffold
-├── core/constants.dart              — openLibraryBaseUrl/UserAgent, bookLookupTimeout, autoAddConfidenceThreshold (0.75)
-├── models/book.dart                 — Book model, fromOpenLibraryJson, fromFirestore, toFirestore (id, googleBooksId, dateAdded, genre, pageCount)
+├── core/constants.dart              — googleBooksBaseUrl, openLibraryBaseUrl/UserAgent, bookLookupTimeout, autoAddConfidenceThreshold (0.75)
+├── core/recognition_log.dart        — debug-only [REC] dump: OCR lines + boxes, query, top match, and why a lookup missed. Source of test/fixtures
+├── models/book.dart                 — Book model, fromGoogleBooksJson + googleCoverUrl (600px, no page-curl), fromOpenLibraryJson, fromFirestore, toFirestore
 ├── models/pending_book.dart         — PendingBook: one queued review card (imagePath, candidates, confidence; topGuess/otherMatches/hasResults)
 ├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult (per-line text + bounding box + imageHeight + isScreenshot)
-├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText (free-text for manual search). Fetches Open Library; Google Books path commented out below it
+├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText. _fetchBooks = Google Books, falling back to Open Library only on timeout/429/5xx
 ├── services/book_repository.dart    — BookRepository: addBook (returns doc id, null if dup), addBooks (one WriteBatch for import), deleteBook, watchBooks. Dedup = same googleBooksId OR same title+author (catches different Google Books editions)
 ├── providers/recognition_provider.dart     — bookRepositoryProvider (+ RecognitionNotifier, now unused — kept in case the camera flow ever wants a single-photo notifier)
 ├── providers/import_provider.dart   — ImportNotifier: importImages routing (collects confident matches → one batched addBooks after the loop), approval queue, autoAdded list, undoAutoAdd/approveTop/rejectTop, addedCount/alreadyInLibrary/reviewCount/progress

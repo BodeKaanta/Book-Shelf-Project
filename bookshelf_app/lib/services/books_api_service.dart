@@ -7,9 +7,17 @@ import '../core/recognition_log.dart';
 import '../models/book.dart';
 import 'book_recognition_service.dart';
 
-// Open Library needs no key. Kept for a fast switch back to Google Books (#75).
 // Injected at build time: flutter run --dart-define-from-file=.env
-// const _apiKey = String.fromEnvironment('GOOGLE_BOOKS_API_KEY');
+const _apiKey = String.fromEnvironment('GOOGLE_BOOKS_API_KEY');
+
+// An empty result set and a request that never completed are different answers.
+// The fallback fires on the second and must never fire on the first: an empty
+// result is a real "no such book", and falling back on every genuine miss would
+// double request volume on exactly the photos that already fail.
+typedef _Lookup = ({List<Book>? books, bool failed});
+
+const _Lookup _noResults = (books: null, failed: false);
+const _Lookup _requestFailed = (books: null, failed: true);
 
 class BooksApiService {
   Future<({List<Book> books, String query, double confidence})> searchBooks(
@@ -83,7 +91,57 @@ class BooksApiService {
     return await _fetchBooks(trimmed, 10) ?? <Book>[];
   }
 
+  // Google Books primary, Open Library only when Google could not be reached.
+  // Null means "nothing matched" either way, so every caller above is unchanged.
   Future<List<Book>?> _fetchBooks(String query, [int maxResults = 5]) async {
+    final primary = await _lookupGoogleBooks(query, maxResults);
+    if (!primary.failed) return primary.books;
+
+    logLookupFailure(query, 'Google Books unreachable — trying Open Library');
+    return (await _lookupOpenLibrary(query, maxResults)).books;
+  }
+
+  Future<_Lookup> _lookupGoogleBooks(String query, int maxResults) async {
+    final uri = Uri.parse(
+      '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}'
+      '&maxResults=$maxResults&key=$_apiKey',
+    );
+
+    final http.Response response;
+    try {
+      response = await http.get(uri).timeout(bookLookupTimeout);
+    } on Exception catch (error) {
+      logLookupFailure(query, 'google request failed: $error');
+      return _requestFailed;
+    }
+    if (response.statusCode != 200) {
+      logLookupFailure(query, 'google HTTP ${response.statusCode}');
+      // Only throttling and server faults are worth asking someone else about.
+      // Any other 4xx means we asked wrongly or the key is bad, and quietly
+      // rerouting every request would hide that indefinitely — the silent
+      // degradation that let #75 go unnoticed for months.
+      final transient =
+          response.statusCode == 429 || response.statusCode >= 500;
+      return transient ? _requestFailed : _noResults;
+    }
+
+    final data = json.decode(response.body) as Map<String, dynamic>;
+    final items = data['items'] as List<dynamic>?;
+    if (items == null || items.isEmpty) {
+      logLookupFailure(query, 'no results');
+      return _noResults;
+    }
+
+    return (
+      books: items
+          .whereType<Map<String, dynamic>>()
+          .map(Book.fromGoogleBooksJson)
+          .toList(),
+      failed: false,
+    );
+  }
+
+  Future<_Lookup> _lookupOpenLibrary(String query, int maxResults) async {
     final uri = Uri.parse(
       '$openLibraryBaseUrl?q=${Uri.encodeComponent(query)}&limit=$maxResults'
       '&fields=key,title,author_name,cover_i,number_of_pages_median,subject',
@@ -95,50 +153,30 @@ class BooksApiService {
           .get(uri, headers: {'User-Agent': openLibraryUserAgent})
           .timeout(bookLookupTimeout);
     } on Exception catch (error) {
-      logLookupFailure(query, 'request failed: $error');
-      return null;
+      logLookupFailure(query, 'openlibrary request failed: $error');
+      return _requestFailed;
     }
     if (response.statusCode != 200) {
-      logLookupFailure(query, 'HTTP ${response.statusCode}');
-      return null;
+      logLookupFailure(query, 'openlibrary HTTP ${response.statusCode}');
+      return _requestFailed;
     }
 
     final data = json.decode(response.body) as Map<String, dynamic>;
+    // Open Library returns `docs` empty on a miss where Google omits `items`.
     final docs = data['docs'] as List<dynamic>?;
-    // Google Books omitted `items` entirely on a miss; Open Library always
-    // returns `docs`, empty. Callers distinguish null (try another query) from
-    // a non-empty list, so an empty result must stay null or the retry paths
-    // above are skipped.
     if (docs == null || docs.isEmpty) {
-      logLookupFailure(query, 'no results');
-      return null;
+      logLookupFailure(query, 'openlibrary no results');
+      return _noResults;
     }
 
-    return docs
-        .whereType<Map<String, dynamic>>()
-        .map(Book.fromOpenLibraryJson)
-        .toList();
+    return (
+      books: docs
+          .whereType<Map<String, dynamic>>()
+          .map(Book.fromOpenLibraryJson)
+          .toList(),
+      failed: false,
+    );
   }
-
-  // Google Books fetch — kept for a fast switch back if its corpus recovers.
-  // Future<List<Book>?> _fetchBooksGoogle(String query,
-  //     [int maxResults = 5]) async {
-  //   final uri = Uri.parse(
-  //     '$googleBooksBaseUrl?q=${Uri.encodeComponent(query)}&maxResults=$maxResults&key=$_apiKey',
-  //   );
-  //
-  //   final response = await http.get(uri);
-  //   if (response.statusCode != 200) return null;
-  //
-  //   final data = json.decode(response.body) as Map<String, dynamic>;
-  //   final items = data['items'] as List<dynamic>?;
-  //   if (items == null) return null;
-  //
-  //   return items
-  //       .whereType<Map<String, dynamic>>()
-  //       .map(Book.fromGoogleBooksJson)
-  //       .toList();
-  // }
 
   // Reorder candidates so the one whose title best matches the OCR text wins.
   // Only reorders when a genuinely close match exists (>= threshold), otherwise
