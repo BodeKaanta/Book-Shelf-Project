@@ -1,7 +1,7 @@
 # Bookedex (BookShelf App)
 
 ## What This Is
-Flutter/Dart mobile app (Android-first, iOS in Phase 2). Users capture book covers via photo, screenshot, or manual entry into a unified visual library. A mood quiz then rediscovers books from their own library — solving the "saved-list paradox." Not a social app. Not a Goodreads clone.
+Flutter/Dart mobile app (Android-first; **iOS pulled forward from Phase 2 to unblock the beta** — see "iOS + Beta Distribution"). Users capture book covers via photo, screenshot, or manual entry into a unified visual library. A mood quiz then rediscovers books from their own library — solving the "saved-list paradox." Not a social app. Not a Goodreads clone.
 
 **App name:** Bookedex
 **Package ID:** `com.bookedex.app`
@@ -50,7 +50,7 @@ A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App
 - External recommendations (Phase 3)
 - Goodreads/StoryGraph import (Phase 3)
 - Social sharing or friend features (Phase 3)
-- iOS support (Phase 2)
+- iOS-specific *feature* work beyond what shipping a beta build needs (Phase 2). The iOS **build and distribution** path moved up — see "iOS + Beta Distribution". Nothing else from Phase 2 came with it.
 
 ## Critical UX Rules
 - **No push notifications in MVP.** Margot turns off push notifications on almost every app. In-app prompts only, triggered on open.
@@ -113,7 +113,7 @@ A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App
 - Always edit CLAUDE.md locally as a file and commit it through git — never via the GitHub API directly
 
 ## Starting a New Session
-Always run these three commands at the start of a session to orient yourself before doing anything:
+Always run these two commands at the start of a session to orient yourself before doing anything:
 ```
 gh pr list --state open
 gh issue list --label "Task" --state open
@@ -155,6 +155,48 @@ The dart-define is **mandatory again (#81)** — Google Books is primary and nee
 **Icon:** source art `assets/icon/bookedex_icon.png`; regenerate with `dart run flutter_launcher_icons` after changing it (config in `pubspec.yaml`). Adaptive background `#EA3442` sampled from the art, 18% foreground inset so the launcher mask doesn't clip the B.
 
 **Play requirements already met:** `targetSdk`/`compileSdk` 36, `minSdk` 24, `applicationId` `com.bookedex.app`, label "Bookedex". The **store-listing** icon must be exactly 512×512 — the source art is 513×513 and will be rejected until resized.
+
+## iOS + Beta Distribution (Aug 2026)
+**Why iOS moved up.** Every beta tester who agreed to test is an iOS user; Bode and Richie are both Android. There is literally nobody to hand an Android beta to, so the iOS build path came forward from Phase 2. Nothing else from Phase 2 came with it.
+
+**Apple Developer Program — $99/yr, enrolled as Individual.** Organization enrollment needs a D-U-N-S number and a legal entity, which don't exist. Consequences of Individual:
+- The account is bound to Bode's verified legal identity, so the name must be **Bode Kaanta** exactly as on the government ID. This becomes the public **App Store seller name** at launch (invisible on TestFlight). Individual → Organization is possible later but is a support-request migration, not a toggle.
+- Account Holder is the personal Apple ID `bodekaanta@gmail.com` (chosen because the phone number was already attached). Fine and normal. The Apple ID email can be **renamed** to a project address later without losing certificates or apps — that is not the same as transferring ownership, which an Individual account can't simply do.
+- `bookedexapp@gmail.com` should be added as an App Store Connect **user** (project-branded notifications) and used as the **public support email** on the listing. Richie gets his own App Store Connect user — never share the Account Holder password. Account Holder is exactly one person.
+
+**TestFlight is the beta channel — it is NOT the App Store.** No public listing, no ranking, no full App Store review. This distinction caused confusion; it is worth restating.
+- **Internal testing:** ≤100 testers, each must be a user on the App Store Connect team. No review, live minutes after the build finishes processing.
+- **External testing:** the shareable public link. Requires **Beta App Review** (24–48h on the first build of a version), a **privacy policy URL**, and App Privacy answers — anonymous auth + Firestore counts as data collection.
+- **The public link is created once and never changes.** New builds flow to the same URL and tester group; testers re-click nothing. You do not pay the review wait per push.
+- Later builds at the same version usually skip full review (minutes to hours). A new version number or a new permission can trigger another.
+- **Every upload needs a higher build number** — the `+N` in `pubspec.yaml`'s `version:`. Reusing one is rejected outright. Builds expire **90 days** after upload.
+- Testers get a TestFlight notification; whether it self-installs depends on a per-app toggle the *tester* controls.
+
+**Sideloading was considered and rejected.** Free-provisioning and AltStore/SideStore give **7-day** certificates and require each tester to cable their phone to a computer weekly plus enable Developer Mode. Enterprise certificates ($299/yr) are employees-only and Apple revokes them for outside distribution. There is no "tap a link, install an .ipa" on iOS. Firebase App Distribution supports iOS but is only a delivery pipe — it still needs a paid Ad Hoc profile, so it routes around nothing.
+
+**There is no Mac in the project.** Flutter cannot build iOS on Windows, and a macOS VM on non-Apple hardware violates Apple's license. Available: Bode's sister's MacBook (sometimes), Richie's MacBook (no toolchain installed — Xcode alone is a ~7–10GB download, so it must be installed *before* any session).
+- **Codemagic** (free tier ~500 macOS min/month) can build and upload to TestFlight with **no Mac at all**, signing via an App Store Connect API key generated on the web. This is the intended routine path.
+- The real cost of Mac-free is **debugging**: no hot reload, no breakpoints, no easy device logs — only TestFlight crash reports. Borrow a Mac when something needs actual investigation.
+- **On-device test target: Bode's iPad 9th gen, iPadOS 18.1.1** — clears the 15.5 floor and is arm64, so ML Kit behaves like real hardware. Its camera is worse than the testers' iPhones, so treat any OCR figure from it as a floor, not a measurement. The phone-shaped UI will look stretched on a tablet; cosmetic, ignore.
+
+**⚠️ The dart-define trap is worse on iOS.** Build with:
+```
+flutter build ipa --dart-define-from-file=.env
+```
+**Never Xcode's Archive button** — it does not pass the dart-define, and `main()`'s assert is stripped in release, so the build fails *silently*: every Google Books lookup 429s and quietly falls through to the Open Library fallback. You would ship a beta with degraded recognition and no error explaining why. `.env` is gitignored, so it must be **hand-carried to any Mac** — add it to the "files git will never carry" list above.
+
+**iOS config, filled in by #85 / PR #86.** `ios/` was untouched Flutter template output pointing at nothing.
+- Bundle ID `com.bookedex.app` (was `com.example.bookshelfApp`) across all configs in `ios/Runner.xcodeproj/project.pbxproj`.
+- `IPHONEOS_DEPLOYMENT_TARGET` **15.5** — the floor for ML Kit's current iOS SDK. `pod install` may demand higher; one-line fix.
+- `ios/Runner/Info.plist` carries `NSCameraUsageDescription` + `NSPhotoLibraryUsageDescription`. **iOS terminates the process without these**, so Capture and Import crashed instantly. App Review also rejects vague strings, so they name what the data is used for.
+- `ios/Podfile` is hand-written and pins `platform :ios, '15.5'`; Flutter's auto-generated one defaults below ML Kit's minimum. If `pod install` rejects it, deleting it and letting Flutter regenerate + editing the platform line is the fallback.
+- Icons: `remove_alpha_ios: true` + `background_color_ios: "#EA3442"` (matching the Android adaptive background — without the colour it defaults to **white**). **The App Store rejects icons carrying an alpha channel.** Verify with the PNG colour-type byte at offset 25: must be `2` (RGB), not `6` (RGBA).
+- **Firebase keys iOS apps by bundle ID and cannot rename one**, so changing the bundle ID orphaned the old registration and a new iOS app had to be created: `1:374852436729:ios:f7fc3301d9fc0912dcd828`. Regenerate with `flutterfire configure --platforms=android,ios` — pass **both** platforms, because it rewrites the whole of `firebase_options.dart` and an iOS-only run can disturb the Android block. Run it **on the task branch**: flutterfire reads the bundle ID from the Xcode project, so running it on `main` (where the old ID still lives) silently registers the wrong app. That happened once.
+- Deliberately left stale: the `macos` block in `firebase_options.dart` (flutterfire only regenerates platforms you ask for; macOS isn't a build target) and `google-services.json` (flutterfire wants to add an iOS OAuth client entry — and deleting a Firebase *app* does not delete its underlying OAuth *client*, so the entry describes an app that no longer exists. Android ignores iOS clients).
+
+**Before external TestFlight:** privacy policy URL live, App Privacy answers filled, and **"Bookedex" reserved in App Store Connect** — app names are first-come across the entire App Store.
+
+**Not yet done:** first successful iOS build (the verification gate on PR #86), Codemagic setup, App Store Connect app record.
 
 ## Recognition Status (as of Aug 2026)
 Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Google Books search** (Open Library on transport failure) → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
@@ -205,6 +247,8 @@ Earlier figures, different sets: initial clean-photo pass 9/12; a harder real-wo
 - *Monk & Robot omnibus* — matches book 1 (*A Psalm for the Wild-Built*) because the query picked up a blurb's trailing title reference (`-SARAH GAILEY on` / `A Psalm for the Wild-Built`). #78 strips quote bodies but not a blurb's cited title.
 
 **Key constraint — OCR can't be improved app-side:** ML Kit's text model is BUNDLED (`com.google.mlkit:text-recognition:16.0.1`), identical across plugin versions and devices — NOT served via Play Services. Bumping the plugin (tried & closed in #56) doesn't change it. The physical device (arm64) reads worse than the emulator (x86_64) on the same model, so **always validate recognition on the physical device — the emulator flatters results.**
+
+**Every accuracy figure below is Android-derived and has never been measured on iOS.** ML Kit ships a *different* SDK build on iOS, so 16/20 must not be assumed to transfer. Re-measure once an iOS build runs on real hardware, and note the iPad's camera is worse than the testers' iPhones — an iPad number is a floor, not the result. The iOS Simulator is not a substitute: it has no usable camera and ML Kit is historically fussy on Apple Silicon simulators.
 
 **Recognition work shipped:**
 - #46 — screenshot-aware filtering: detect screenshot by portrait aspect ratio ≥1.85; zone downweighting + text-size weighting (screenshot-only, to protect clean-photo scoring); social-UI line filtering
@@ -271,6 +315,7 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 
 **Follow-ups filed as issues:**
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
+- **#87 (delete `linux/`, `macos/`, `windows/`)** — those seven generated plugin-registrant files show as modified after **every** `flutter pub get` (including the implicit ones inside `dart run flutter_launcher_icons` and `flutterfire configure`) with **zero content change**: Flutter writes LF, Windows Git checks out CRLF. Confirm it's cosmetic with `git diff --ignore-cr-at-eol --stat` (returns nothing) and discard with `git checkout -- bookshelf_app/linux bookshelf_app/macos bookshelf_app/windows`. It makes a clean `main` read as dirty (`main*` in VS Code), which is not a real change and needs no pull. **Do it before the Mac build session** — not because it blocks anything, but because that session means repeated `pub get` on a borrowed laptop under time pressure, the exact conditions for sweeping the noise into a rushed `git add -A`.
 
 **Ideas not yet created:**
 - **Change cover — a post-add feature, part of step 7.** Bode's design: the book detail pop-out carries a 3-dot menu, and one option is "Change cover", which offers the other Google Books editions of that book so the cover matches the user's physical copy. **Deliberately not part of import** — whatever cover recognition picks is fine at add time, and we advertise that it can be changed afterwards. This is why import can dedupe duplicate editions freely (#83): the editions are re-queried on demand by title+author when the user asks, never carried through the review queue or stored. `coverUrl` is a single Firestore field, so changing the cover is one overwrite. True custom-photo covers are different — they need Cloud Storage = Phase 2.
@@ -305,6 +350,6 @@ bookshelf_app/lib/
 | Phase | Timeline | Goal |
 |---|---|---|
 | MVP Build | May–Jul 2026 | Camera capture, visual library, mood quiz, in-app prompts |
-| Beta | Aug–Sep 2026 | 20-50 users, mood tagging, iterate on UX |
+| Beta | Aug–Sep 2026 | 20-50 users, mood tagging, iterate on UX. **Delivered via iOS TestFlight** — every tester who agreed is an iOS user, so the iOS build path moved up from Phase 2. See "iOS + Beta Distribution" |
 | Launch v1.0 | Oct 2026 | Google Play, free + Pro tiers live — complete the pre-launch security steps in "API Keys & Secrets" first (App Check + key restrictions) |
-| Phase 2 | Q1 2027 | iOS, AI auto-tagging, social sharing |
+| Phase 2 | Q1 2027 | iOS *feature* parity + polish (the build path landed early for beta), AI auto-tagging, social sharing |
