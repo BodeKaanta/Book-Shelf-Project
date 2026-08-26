@@ -154,6 +154,10 @@ class _GridTile extends StatelessWidget {
               ? Image.network(
                   url,
                   fit: BoxFit.cover,
+                  // Covers are stored at 600px so the detail sidebar has a sharp
+                  // source; decoding every grid tile at that width would hold
+                  // ~2MB each and thrash the 100MB image cache on a full shelf.
+                  cacheWidth: 400,
                   errorBuilder: (_, _, _) => _placeholder(),
                 )
               : _placeholder(),

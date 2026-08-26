@@ -7,12 +7,13 @@ import 'screens/main_scaffold.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Open Library needs no key, so builds no longer require the dart-define.
-  // Restore alongside the Google Books path if its corpus recovers (#75).
-  // assert(
-  //   const String.fromEnvironment('GOOGLE_BOOKS_API_KEY').isNotEmpty,
-  //   'Missing Google Books API key — run with --dart-define-from-file=.env',
-  // );
+  // Google Books is the primary source again (#81) and its key is required —
+  // keyless calls return 429. Debug-only: this assert is stripped in release, so
+  // a keyless release build fails silently. Verify before shipping a bundle.
+  assert(
+    const String.fromEnvironment('GOOGLE_BOOKS_API_KEY').isNotEmpty,
+    'Missing Google Books API key — run with --dart-define-from-file=.env',
+  );
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   if (FirebaseAuth.instance.currentUser == null) {
