@@ -273,7 +273,7 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
 
 **Ideas not yet created:**
-- Edition-picker / custom cover — let the user choose among a book's Google Books editions so the cover matches their physical copy (no storage needed); true custom-photo covers need Cloud Storage = Phase 2.
+- **Change cover — a post-add feature, part of step 7.** Bode's design: the book detail pop-out carries a 3-dot menu, and one option is "Change cover", which offers the other Google Books editions of that book so the cover matches the user's physical copy. **Deliberately not part of import** — whatever cover recognition picks is fine at add time, and we advertise that it can be changed afterwards. This is why import can dedupe duplicate editions freely (#83): the editions are re-queried on demand by title+author when the user asks, never carried through the review queue or stored. `coverUrl` is a single Firestore field, so changing the cover is one overwrite. True custom-photo covers are different — they need Cloud Storage = Phase 2.
 - `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain.
 - Full "delight" import loading animation/game — Phase 2 polish.
 
