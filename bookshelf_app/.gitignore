@@ -53,3 +53,11 @@ app.*.map.json
 android/key.properties
 *.jks
 *.keystore
+
+# Desktop platforms — not build targets (#87). The scaffolding is deleted,
+# but flutter pub get still regenerates plugin registrants into these paths.
+# Left untracked they reappeared on every pub get, making a clean main read
+# as dirty.
+/linux/
+/macos/
+/windows/
