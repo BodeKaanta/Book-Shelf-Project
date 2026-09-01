@@ -57,17 +57,15 @@ class DefaultFirebaseOptions {
     projectId: 'bookedex-cd74a',
     storageBucket: 'bookedex-cd74a.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyA_wf8Q-nnVeb70IW9lIrGIrWiY5SvdL5w',
-    appId: '1:374852436729:ios:2a5987940394dcdfdcd828',
+    appId: '1:374852436729:ios:f7fc3301d9fc0912dcd828',
     messagingSenderId: '374852436729',
     projectId: 'bookedex-cd74a',
     storageBucket: 'bookedex-cd74a.firebasestorage.app',
-    iosClientId: '374852436729-92dklve46ihl365dfb7qh3b3f9rulotn.apps.googleusercontent.com',
-    iosBundleId: 'com.example.bookshelfApp',
+    iosClientId: '374852436729-e667ducbe2heq4h1oh79u394u10bo43v.apps.googleusercontent.com',
+    iosBundleId: 'com.bookedex.app',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyA_wf8Q-nnVeb70IW9lIrGIrWiY5SvdL5w',
     appId: '1:374852436729:ios:2a5987940394dcdfdcd828',
