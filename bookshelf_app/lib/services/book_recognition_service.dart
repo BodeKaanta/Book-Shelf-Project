@@ -32,21 +32,59 @@ class BookRecognitionService {
 
       final lines = [
         for (final block in recognizedText.blocks)
-          for (final line in block.lines)
-            OcrLine(line.text, line.boundingBox),
+          for (final line in block.lines) OcrLine(line.text, line.boundingBox),
       ];
 
       final (width, height) = await _imageDimensions(image);
+      final transposed = _hasTransposedBoxes(lines);
 
       return OcrResult(
-        lines: lines,
-        imageHeight: height,
+        lines: transposed ? _transposeBoxes(lines) : lines,
+        imageHeight: transposed ? width : height,
         isScreenshot: _isScreenshot(width, height),
       );
     } finally {
       await recognizer.close();
     }
   }
+
+  // ML Kit on iOS returns frames in the photo's unrotated buffer, so an
+  // EXIF-rotated photo arrives with every box's axes swapped -- a 37-character
+  // line of cover text measuring 69 wide by 458 tall. The query builder reads a
+  // box taller than it is wide as a neighbouring book's spine and drops it, so
+  // almost every line of a rotated cover was being discarded and the query built
+  // from scraps ("THE", "A", "sci"). Correcting at this boundary keeps every
+  // rule downstream working on the geometry it was tuned for.
+  //
+  // Line length is the signal: horizontal text of four or more characters is
+  // always wider than it is tall, so six is a safe floor, while a short line
+  // ("JN", "A") legitimately is not. Six caught every rotated photo in the
+  // 20-photo set with no false positives; twelve missed two sparse covers.
+  static const _aspectSampleMinLength = 6;
+  static const _aspectSampleMinCount = 3;
+
+  bool _hasTransposedBoxes(List<OcrLine> lines) {
+    final sample = [
+      for (final line in lines)
+        if (line.text.length >= _aspectSampleMinLength) line.boundingBox,
+    ];
+    if (sample.length < _aspectSampleMinCount) return false;
+    final tall = sample.where((box) => box.height > box.width).length;
+    return tall * 2 > sample.length;
+  }
+
+  List<OcrLine> _transposeBoxes(List<OcrLine> lines) => [
+    for (final line in lines)
+      OcrLine(
+        line.text,
+        ui.Rect.fromLTRB(
+          line.boundingBox.top,
+          line.boundingBox.left,
+          line.boundingBox.bottom,
+          line.boundingBox.right,
+        ),
+      ),
+  ];
 
   Future<(int width, int height)> _imageDimensions(XFile image) async {
     final bytes = await image.readAsBytes();
