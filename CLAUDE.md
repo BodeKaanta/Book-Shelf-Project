@@ -11,6 +11,8 @@ Flutter/Dart mobile app (Android-first; **iOS pulled forward from Phase 2 to unb
 
 A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App\Book-Shelf-Project` pending deletion. **Check you are in `C:\dev` before editing** — edits have landed in the wrong copy before. Note Windows' shell "Documents" is redirected into OneDrive, so `C:\Users\bodek\Documents` is a *different*, non-synced folder from the one Explorer shows.
 
+**Second working copy on a Mac: `/Users/suvikaanta/dev/Book-Shelf-Project`** — Bode's sister's MacBook, added Sep 2026 to build iOS. It is a normal clone; git is the only thing that moves work between the two machines. The four files git will never carry have to be hand-copied — on the Mac only `.env` is actually needed (see "iOS + Beta Distribution").
+
 ## Team
 - **Bode** (me): sole developer
 - **Richie**: product, UX/UI design, marketing
@@ -156,7 +158,7 @@ The dart-define is **mandatory again (#81)** — Google Books is primary and nee
 
 **Play requirements already met:** `targetSdk`/`compileSdk` 36, `minSdk` 24, `applicationId` `com.bookedex.app`, label "Bookedex". The **store-listing** icon must be exactly 512×512 — the source art is 513×513 and will be rejected until resized.
 
-## iOS + Beta Distribution (Aug 2026)
+## iOS + Beta Distribution (Aug–Sep 2026)
 **Why iOS moved up.** Every beta tester who agreed to test is an iOS user; Bode and Richie are both Android. There is literally nobody to hand an Android beta to, so the iOS build path came forward from Phase 2. Nothing else from Phase 2 came with it.
 
 **Apple Developer Program — $99/yr, enrolled as Individual.** Organization enrollment needs a D-U-N-S number and a legal entity, which don't exist. Consequences of Individual:
@@ -196,9 +198,37 @@ flutter build ipa --dart-define-from-file=.env
 
 **Before external TestFlight:** privacy policy URL live, App Privacy answers filled, and **"Bookedex" reserved in App Store Connect** — app names are first-come across the entire App Store.
 
-**Not yet done:** first successful iOS build (the verification gate on PR #86), Codemagic setup, App Store Connect app record.
+### iOS build status (Sep 2026) — it runs
 
-## Recognition Status (as of Aug 2026)
+**The first successful iOS build happened Sep 3 2026**, clearing the verification gate PR #86 left open. A release build installs and launches standalone on Bode's iPad (9th gen, iPadOS 18.1.1), camera capture works, and Google Books recognition resolves books. The App Store Connect app record exists and "Bookedex" is reserved.
+
+**"In iOS 14+ debug mode Flutter apps can only be launched from Flutter tooling…" is normal, not a bug.** Debug Flutter runs Dart through a JIT, which needs the `get-task-allow` entitlement and a debugger attached at launch; Apple closed the loophole that let such apps self-launch. So a debug build installs fine, runs fine under `flutter run`, and shows that screen the moment you tap its icon. **This cost a session to diagnose — it is not a repo-path or Xcode problem.** For untethered use build release or profile:
+```
+flutter run --release --dart-define-from-file=.env -d <device-id>
+```
+
+**Xcode must be signed in for distribution export.** `flutter build ipa` archives fine but fails at the export step with `No Accounts` / `No signing certificate "iOS Distribution" found` when Xcode has no Apple ID. Device builds keep working throughout, because an `Apple Development` certificate is already in the keychain — **distribution** certificates are fetched from Apple on demand and need an account. Fix in Xcode → Settings → Accounts → **+**. Check with `security find-identity -v -p codesigning`; zero "Apple Distribution" lines means it will fail. Xcode Organizer (`open build/ios/archive/Runner.xcarchive`) is the more reliable route since it can create the certificate interactively.
+
+**The iOS dependency setup is a hybrid, and both lockfiles matter.** ML Kit is the *only* thing left on CocoaPods (`google_mlkit_commons` and `google_mlkit_text_recognition` are the sole `DEPENDENCIES` entries in `Podfile.lock`) because they are the only plugins without Swift Package Manager support. Everything Firebase resolves through **SPM**. So `ios/**/swiftpm/Package.resolved` is a real lockfile, not Xcode noise, and is committed for the same reason `Podfile.lock` is: a clean clone could otherwise resolve different Firebase versions than the build you tested. That matters most for Codemagic, which builds from a fresh clone every time.
+
+**ML Kit ships no arm64 simulator slices** (`GoogleMLKit`, `MLImage`, `MLKitCommon`, `MLKitVision`). The Simulator isn't merely "fussy" as previously assumed — the architecture is absent. iOS recognition can only be tested on physical hardware. The build also warns that the ML Kit plugins' lack of SPM support "will become an error in a future version of Flutter" — a forced migration eventually.
+
+**`ITSAppUsesNonExemptEncryption = false`** is in `Info.plist`. Without it App Store Connect asks the export-compliance question on *every* build before it can be distributed. `false` is accurate: only standard HTTPS/TLS to Google Books and Firebase, which Apple exempts.
+
+**Which machine can cut a release:**
+
+| Release | Where |
+|---|---|
+| Android (Play AAB) | Windows, as always |
+| iOS (TestFlight / App Store) | **Mac only** — or Codemagic |
+
+Windows cannot build iOS at all: Xcode and codesigning are macOS-only, and a macOS VM on non-Apple hardware violates Apple's licence. **Codemagic is the only genuine Mac-free path** and is what removes the dependency on a borrowed laptop.
+
+**The privacy policy must be a public URL, not a document.** App Store Connect will not accept a file — it has to be reachable by reviewers and testers without a login. GitHub Pages off this repo is the natural fit: free, versioned with the code, and editable from Windows. It and the separate App Privacy questionnaire are the two remaining gates on the **external** (shareable-link) TestFlight track; internal testing needs neither.
+
+**Not yet done:** Codemagic setup, privacy policy URL, App Privacy answers, first TestFlight upload.
+
+## Recognition Status (as of Sep 2026)
 Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Google Books search** (Open Library on transport failure) → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
 
 ### Data source: Google Books primary, Open Library fallback (#81, Aug 2026)
@@ -248,7 +278,39 @@ Earlier figures, different sets: initial clean-photo pass 9/12; a harder real-wo
 
 **Key constraint — OCR can't be improved app-side:** ML Kit's text model is BUNDLED (`com.google.mlkit:text-recognition:16.0.1`), identical across plugin versions and devices — NOT served via Play Services. Bumping the plugin (tried & closed in #56) doesn't change it. The physical device (arm64) reads worse than the emulator (x86_64) on the same model, so **always validate recognition on the physical device — the emulator flatters results.**
 
-**Every accuracy figure below is Android-derived and has never been measured on iOS.** ML Kit ships a *different* SDK build on iOS, so 16/20 must not be assumed to transfer. Re-measure once an iOS build runs on real hardware, and note the iPad's camera is worse than the testers' iPhones — an iPad number is a floor, not the result. The iOS Simulator is not a substitute: it has no usable camera and ML Kit is historically fussy on Apple Silicon simulators.
+**The figures above are Android-derived.** iOS has now been measured separately — see "iOS recognition" below. ML Kit ships a *different* SDK build on iOS and the two do **not** behave the same, so never assume an Android number transfers. The iOS Simulator is not a substitute for a device: ML Kit ships no arm64 simulator slices at all.
+
+### iOS recognition — measured Sep 2026, and the transposition bug (#94)
+
+**iOS lands at 14/19 correct** on Margot's set imported on the iPad, against Android's 16/20. Comparable overall, but a *different* failure set.
+
+**The bug that was hiding it: ML Kit on iOS returns transposed bounding boxes.** iOS reports text frames in the photo's **unrotated buffer**, so any photo carrying EXIF rotation arrives with every box's axes swapped — a 37-character line of cover text measuring 69 wide by 458 tall. `_isRotated` then reads it as a neighbouring book's spine (the #78 rule) and drops it, so almost every line of a rotated cover was discarded and the query built from scraps. **10 of 19 photos were affected.**
+
+| | Before | After |
+|---|---|---|
+| Returned a book | 12/19 | **19/19** |
+| Auto-added (≥0.75) | 2 | **6** |
+| Correct | ~7 | **14/19** |
+
+Queries went `sci` → `INVISIBLE CITIES ITALO CALVINO`, `THE` → `CASTLE JOHN GOODALL`, `THE HOUSE OF` → `THE HOUSE OF A SAGA OF THE RUSSIAN`, and `onumental. A gigantic fable of genuine truths.` → `OverstOry Richard Powers`.
+
+**Fixed in `book_recognition_service.dart`, not the query builder** — at the boundary where ML Kit data enters, so `_isRotated`, the reading-order sort, and the size and zone weighting all keep working on the geometry they were tuned for and `books_api_service.dart` needed no change. Detection samples lines of **six or more characters** (horizontal text of four or more is always wider than it is tall, so six is a safe floor) and swaps the axes when the majority come back taller than wide. The threshold was swept against captured data: six caught 11/11 rotated photos with no false positives, where twelve missed two sparse covers.
+
+**The Android fixtures are the regression test.** `test/fixtures/ocr_fixtures.dart` holds Android OCR, which is not transposed, so the gate never fires on it — all 30 tests pass unchanged. If they ever move, the gate is wrong.
+
+**`_transposeBoxes` is a reflection, not a true rotation.** It reliably corrects the aspect ratio, which is what `_isRotated` keys on, but reading order may come out bottom-to-top on some photos. Per #78 order matters for a title split over several lines. Not observed to bite yet; suspect it first if a multi-line title scrambles while single-line titles work.
+
+**Surprise win: House of Government now resolves on iOS though it never has on Android.** It is the shelf photo with ~50 OCR lines from four books. Once cover text stops being misread as spine text, `_isRotated` finally does the job it was written for — separating the photographed book from its neighbours.
+
+**Two iOS-only failures remain, both on non-transposed photos and unrelated to the fix:**
+- *Project Hail Mary* → query `HAIL SPECULATIVE SP` → *NASA SP.*
+- *The Notebook* → `NOTEBOOK Nicholas Sparks . WILL NOT LET YOU GO. HIS NOVEL SHINES.` — blurb text diluting a query that already holds the right title and author
+
+Both exist because **iOS ML Kit segments lines differently than Android**, which defeats junk filters tuned on Android's segmentation — the same root reason `NATIONAL BESTSELLER` arrived as `NATIONAL BESTSELL E R` and slipped past the bestseller-band filter. This is the #55/#78 domain and wants its own issue.
+
+The other three failures (*I Cheerfully Refuse* destroyed OCR, the *Monk & Robot* omnibus, *Pines*→*Wayward*) are the **same documented Android failures** — iOS converged on the same known limitations.
+
+**Capturing iOS OCR for diagnosis:** run a debug build over the cable (`flutter run --dart-define-from-file=.env -d <id>`), import the photos, and read the `[REC]` records. `recognition_log.dart` is `kDebugMode`-gated and is the only logging in `lib/`, so it compiles out of release automatically — nothing to disable before shipping.
 
 **Recognition work shipped:**
 - #46 — screenshot-aware filtering: detect screenshot by portrait aspect ratio ≥1.85; zone downweighting + text-size weighting (screenshot-only, to protect clean-photo scoring); social-UI line filtering
@@ -314,6 +376,7 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 **Step 6 issues — all merged:** #41 confidence score · #42 routing · #43 swipe card · #44 manual search · #45 Import wiring + summary popup (+ deleted `poc_screen.dart`) · #68 cascading card stack + picker-return flash.
 
 **Follow-ups filed as issues:**
+- **#93 (iOS: crash on the first "Use Photo" after capture)** — killed the app once on the first camera capture after a fresh install, never reproduced. Ruled out: the Flutter tooling detaching, and a missing usage-description string (both are present, and that class kills the process *every* time). Leading theory is memory pressure — "Use Photo" is peak memory (full-res capture + JPEG encode + ML Kit's first model load) on a 3GB iPad. **Do not "fix" it by downscaling capture**: that reverses the deliberate full-resolution decision that protects thin/vertical cover text. If it was a memory kill there is no `Runner` crash report to find — iOS records those as system-wide `JetsamEvent-*.ips`. Blocked on crash visibility: `devicectl sysdiagnose` fails and nothing syncs to the Mac, which is why TestFlight (dSYMs upload, so reports arrive symbolicated) and Firebase Crashlytics matter.
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
 - ✅ **#87 (delete `linux/`, `macos/`, `windows/`) — done.** Seven generated plugin-registrant files used to show as modified after **every** `flutter pub get` (including the implicit ones inside `dart run flutter_launcher_icons` and `flutterfire configure`) with **zero content change**: Flutter writes LF, Windows Git checks out CRLF. It made a clean `main` read as dirty (`main*` in VS Code) and cost real diagnosis time. **Deleting the folders was necessary but not sufficient** — `flutter pub get` still regenerates the registrant stubs into those paths (an empty `windows/`, three files under `linux/flutter/`, `macos/Flutter/`), so they came straight back as *untracked* noise instead of modified noise. The fix is both halves: the tracked scaffolding is deleted **and** `/linux/`, `/macos/`, `/windows/` are gitignored. Desktop is not a build target — Android + iOS only — so if it were ever wanted, `flutter create --platforms=windows .` regenerates it.
 
@@ -330,7 +393,7 @@ bookshelf_app/lib/
 ├── core/recognition_log.dart        — debug-only [REC] dump: OCR lines + boxes, query, top match, and why a lookup missed. Source of test/fixtures
 ├── models/book.dart                 — Book model, fromGoogleBooksJson + googleCoverUrl (600px, no page-curl), fromOpenLibraryJson, fromFirestore, toFirestore
 ├── models/pending_book.dart         — PendingBook: one queued review card (imagePath, candidates, confidence; topGuess/otherMatches/hasResults)
-├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult (per-line text + bounding box + imageHeight + isScreenshot)
+├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult (per-line text + bounding box + imageHeight + isScreenshot). Normalizes iOS's transposed boxes here (#94) so the query builder sees Android geometry
 ├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText. _fetchBooks = Google Books, falling back to Open Library only on timeout/429/5xx
 ├── services/book_repository.dart    — BookRepository: addBook (returns doc id, null if dup), addBooks (one WriteBatch for import), deleteBook, watchBooks. Dedup = same googleBooksId OR same title+author (catches different Google Books editions)
 ├── providers/recognition_provider.dart     — bookRepositoryProvider (+ RecognitionNotifier, now unused — kept in case the camera flow ever wants a single-photo notifier)
