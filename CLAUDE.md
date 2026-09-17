@@ -41,6 +41,7 @@ A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App
 - Book detail sidebar: buy links, summary, rating, genre, tags, shelves
 - Basic manual shelves and tags
 - Auto-sort by title, author, date added, genre
+- **Search your own library** (#100) — added Sep 2026 at Richie's request; it was missing from this list. Distinct from `manual_search_screen.dart`, which searches Google Books to *add* a book. See "Bottom nav — what each tab is for" under Dashboard Design Notes.
 
 **Surfacing:**
 - "What should I read?" quiz: 2-3 questions → ONE book from the user's library
@@ -69,7 +70,7 @@ A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App
 2. ✅ **Proof of concept only:** photo → ML Kit OCR → Google Books API → display result (no DB, no UI polish)
 3. ✅ Accuracy test: initial pass 9/12 clean photos (75%); after the recognition work (#46/#52/#55/#60) a harder **real-world phone re-test** (bookstore photos: angled, busy shelves, promo bands) landed at **~10/21 (~48%)**. See "Recognition Status" — the ~48% is the honest ceiling for hard photos; the approval flow (step 6) is what makes imperfect recognition usable, so we stopped tuning and moved on.
 4. ✅ Firestore persistence layer
-5. ✅ Visual dashboard — Home screen (Netflix-style rows) + Library screen (3-column grid, genre filter chips) + bottom nav (Home, Search, Capture, Import, Discover) + hamburger drawer (Full Library, Settings)
+5. ✅ Visual dashboard — Home screen (Netflix-style rows) + Library screen (3-column grid, genre filter chips) + bottom nav (Home, Search, Capture, Import, Discover) + hamburger drawer (Full Library, Settings). **The sort control was never wired (#101)** — the screen is done, that button is not.
 6. ✅ Approval/confirmation screen (with uncertainty threshold) — confidence routing (#41/#42), Tinder swipe review card (#43), manual search (#44), Import-tab wiring + summary popup (#45). Details in section below.
 6a. ✅ Camera capture (#67) — Capture tab takes a single photo (`ImageSource.camera`) → the same `importImages` routing → auto-add (snackbar + Undo), open the approval card, or "already in library".
 
@@ -342,6 +343,14 @@ Richie's Figma prototype: https://www.figma.com/make/QjDuOmFO2heo8XJkhrGesw/Desi
 - Grid: 3-column masonry-style grid of book cover photos, each with 1–2 mood tag chips overlaid at bottom-left
 - Bottom nav in Richie's design: Search, Capture, Import, Settings, Discover — **superseded**. Final implemented nav is **Home, Search, Capture, Import, Discover**; Settings lives in the hamburger drawer.
 
+**Bottom nav — what each tab is for.** Never specified when the five tabs were built, and both Search and Discover shipped as `PlaceholderScreen`. Settled Sep 2026:
+- **Search = the user's own library** (#100) — *not* a book-adding flow. Adding already has three doors (Capture, Import, and the manual search inside the approval card) and does not need a fourth.
+- **Discover = finding books the user does not own.** Phase 3's external recommendations land here.
+
+The library-search screen opens from **both** the Search tab and a new search icon in the Library AppBar. The tab is one tap from anywhere; the Library screen is 2–3 taps deep (Home → drawer → Full Library, or the "See all" on the Your Library row), so neither entry point alone covers both "find a book from anywhere" and "search while I am browsing". One widget, two doors.
+
+**⚠️ The Library sort icon does nothing (#101).** `Icons.sort` — the three-lines icon top-right — has an empty `onPressed`, so it reads as a dead control, and the grid hardcodes alphabetical-by-title. This is unfinished **step-5** work, not new scope: "Auto-sort by title, author, date added, genre" was always in MVP Library scope. `author` and `genre` are nullable, so nulls need a consistent home (trailing) or the grid looks randomly shuffled for books without an author.
+
 **Implementation notes:**
 - Data is already in Firestore (`watchBooks()` stream is ready) — this step is mostly UI
 - Each cover tile shows the `coverUrl` from the Book model (Google Books thumbnail URL)
@@ -379,6 +388,8 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 - **#93 (iOS: crash on the first "Use Photo" after capture)** — killed the app once on the first camera capture after a fresh install, never reproduced. Ruled out: the Flutter tooling detaching, and a missing usage-description string (both are present, and that class kills the process *every* time). Leading theory is memory pressure — "Use Photo" is peak memory (full-res capture + JPEG encode + ML Kit's first model load) on a 3GB iPad. **Do not "fix" it by downscaling capture**: that reverses the deliberate full-resolution decision that protects thin/vertical cover text. If it was a memory kill there is no `Runner` crash report to find — iOS records those as system-wide `JetsamEvent-*.ips`. Blocked on crash visibility: `devicectl sysdiagnose` fails and nothing syncs to the Mac, which is why TestFlight (dSYMs upload, so reports arrive symbolicated) and Firebase Crashlytics matter.
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
 - ✅ **#87 (delete `linux/`, `macos/`, `windows/`) — done.** Seven generated plugin-registrant files used to show as modified after **every** `flutter pub get` (including the implicit ones inside `dart run flutter_launcher_icons` and `flutterfire configure`) with **zero content change**: Flutter writes LF, Windows Git checks out CRLF. It made a clean `main` read as dirty (`main*` in VS Code) and cost real diagnosis time. **Deleting the folders was necessary but not sufficient** — `flutter pub get` still regenerates the registrant stubs into those paths (an empty `windows/`, three files under `linux/flutter/`, `macos/Flutter/`), so they came straight back as *untracked* noise instead of modified noise. The fix is both halves: the tracked scaffolding is deleted **and** `/linux/`, `/macos/`, `/windows/` are gitignored. Desktop is not a build target — Android + iOS only — so if it were ever wanted, `flutter create --platforms=windows .` regenerates it.
+- **#100 (search your own library)** — requested by Richie; there is currently no way to find a book you already own. One screen, opened from the bottom-nav Search tab *and* a search icon in the Library AppBar. Filters `booksStreamProvider` **in memory** rather than querying Firestore: Firestore has no substring search (server-side would mean a third-party index like Algolia), the free tier caps at 100 books, and in-memory also works offline at no read cost. `_GridTile` is private to `library_screen.dart` and should be extracted so search results match the grid instead of drifting from it.
+- **#101 (wire up the Library sort control)** — see the warning under Dashboard Design Notes. Small, and already specified by MVP scope.
 
 **Ideas not yet created:**
 - **Change cover — a post-add feature, part of step 7.** Bode's design: the book detail pop-out carries a 3-dot menu, and one option is "Change cover", which offers the other Google Books editions of that book so the cover matches the user's physical copy. **Deliberately not part of import** — whatever cover recognition picks is fine at add time, and we advertise that it can be changed afterwards. This is why import can dedupe duplicate editions freely (#83): the editions are re-queried on demand by title+author when the user asks, never carried through the review queue or stored. `coverUrl` is a single Firestore field, so changing the cover is one overwrite. True custom-photo covers are different — they need Cloud Storage = Phase 2.
