@@ -1,4 +1,6 @@
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -36,7 +38,7 @@ class BookRecognitionService {
       ];
 
       final (width, height) = await _imageDimensions(image);
-      final transposed = _hasTransposedBoxes(lines);
+      final transposed = shouldTranspose(lines, isIOS: Platform.isIOS);
 
       return OcrResult(
         lines: transposed ? _transposeBoxes(lines) : lines,
@@ -63,6 +65,21 @@ class BookRecognitionService {
   static const _aspectSampleMinLength = 6;
   static const _aspectSampleMinCount = 3;
 
+  // Android's ML Kit applies the rotation itself, so its boxes are already
+  // correct and this must never run there (#105). It used to, and on a photo
+  // carrying several neighbouring spines the vote below went the wrong way and
+  // transposed a good photo -- Invisible Cities lost its cover text to
+  // _isRotated and scored 0.00 where it had scored 0.70.
+  @visibleForTesting
+  bool shouldTranspose(List<OcrLine> lines, {required bool isIOS}) =>
+      isIOS && _hasTransposedBoxes(lines);
+
+  // KNOWN LIMITATION, iOS only (#107): a majority vote over every sampled line is the
+  // wrong shape when a photo legitimately contains vertical text. Five spines
+  // outvote three lines of cover text. Harmless on Android now that the gate
+  // never runs there; still live on iOS, and unfixable here without a Mac to
+  // verify against. Weighting the vote by box area is the likely fix -- the
+  // title and author are the largest text, spines are thin.
   bool _hasTransposedBoxes(List<OcrLine> lines) {
     final sample = [
       for (final line in lines)
