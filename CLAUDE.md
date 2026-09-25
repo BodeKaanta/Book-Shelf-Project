@@ -407,6 +407,32 @@ Richie's Figma prototype: tap a cover anywhere in the library → a sheet slides
 
 **Nothing is tappable yet.** Cover tiles have no `onTap` in `library_screen.dart` or the `home_screen` rows — there is currently no way to open anything from a cover. Step 7 has to wire that, and #100 (library search) needs the same destination for its results.
 
+**What Google Books actually returns**, measured across 12 books from Margot's set via the search endpoint the app already calls. The single-volume endpoint (`/volumes/{id}`) adds only `printedPageCount` and `dimensions` — **there is no reason to make a second request.**
+
+| Availability | Fields |
+|---|---|
+| **12/12** | `title`, `authors[]`, `description`, `pageCount`, `categories[]`, `imageLinks`, `publishedDate`, `publisher`, `industryIdentifiers` (ISBN), `language`, `printType`, `maturityRating`, `previewLink`/`infoLink`, `accessInfo.webReaderLink` |
+| **9/12** | `subtitle` — often marketing fluff ("A Novel"), occasionally real |
+| **6/12** | `saleInfo.buyLink` (Google Play), `listPrice`, `retailPrice` — e.g. list $18 / retail $9 |
+| **2/12** | `averageRating`, `ratingsCount` |
+
+Ignore as plumbing: `contentVersion`, `readingModes`, `panelizationSummary`, `allowAnonLogging`, `quoteSharingAllowed`.
+
+**Already stored, no work needed:** title, author, **description (the synopsis)**, pageCount, categories → genre, imageLinks → coverUrl. The synopsis is the one Figma element that is already fully in the database.
+
+**⚠️ Google Books ratings are unusable — 2/12, and the single-volume endpoint does not help.** So MVP scope's "rating" in the sidebar is **the user's own rating** of a book they have read, which is a new Firestore field. The scope line was ambiguous; this settles it.
+
+**Buy links — what is actually possible:**
+- **Amazon: constructible from ISBN-10** (`amazon.com/dp/{ISBN_10}`), present 8/9. The one miss is a movie tie-in whose ISBN-13 starts `979`; those have no ISBN-10 equivalent **by design**, not a data gap. Fall back to a search URL on the ISBN-13.
+- **Google Play: free when present** via `saleInfo.buyLink`, but only 6/12.
+- **Audible: nothing.** Google Books returns no audiobook data at all, so the mockup's "Audible / Audiobook" row could only ever be a search link unless another source is added.
+
+The Figma's clean Amazon-and-Audible pair is therefore aspirational, and "Paperback · Kindle" as distinct formats is not something Google tells us either.
+
+**Affiliate links are deliberately deferred past beta.** The *link* is trivial; the *programme* is not. Amazon Associates needs an application, a disclosure notice, and — verify current terms — historically a few qualifying sales within ~180 days of approval or the account is closed. A 20-tester beta is unlikely to clear that bar, so applying early risks burning the application. Build the row, point it at a plain untagged link, and swap in a tagged URL once there is real traffic. Link to the **physical** book's page: linking out to buy physical goods is standard, while external purchase flows for *digital* content stray into Apple's review rules.
+
+**Store ISBN alongside `publishedDate`.** The detail view reads Firestore, not the API, so anything unstored means a fresh request per open. `publisher` (12/12) and `previewLink` (12/12, "Read a sample") are cheap adds worth considering in the same pass.
+
 **Three gaps between the mockup and the data we actually store:**
 - **`publishedDate` is not on `Book` at all.** Google Books returns `volumeInfo.publishedDate` but `fromGoogleBooksJson` drops it, so "YEAR" needs a new field and a Firestore mapping. The format varies — `2018-04-03`, `2018-04`, `2018` — so take the leading four digits rather than parsing a date.
 - **Google's `categories` are far coarser than the mockup.** The Overstory returns `['Fiction']`, not the "Literary Fiction" the Figma shows. Others give `['Young Adult Fiction']`, `['Electronic books']`, or nothing. The genre chip will often read a bland "Fiction" or be absent — design for both.
