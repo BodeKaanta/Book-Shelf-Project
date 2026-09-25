@@ -392,9 +392,53 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 - **#101 (wire up the Library sort control)** — see the warning under Dashboard Design Notes. Small, and already specified by MVP scope.
 
 **Ideas not yet created:**
-- **Change cover — a post-add feature, part of step 7.** Bode's design: the book detail pop-out carries a 3-dot menu, and one option is "Change cover", which offers the other Google Books editions of that book so the cover matches the user's physical copy. **Deliberately not part of import** — whatever cover recognition picks is fine at add time, and we advertise that it can be changed afterwards. This is why import can dedupe duplicate editions freely (#83): the editions are re-queried on demand by title+author when the user asks, never carried through the review queue or stored. `coverUrl` is a single Firestore field, so changing the cover is one overwrite. True custom-photo covers are different — they need Cloud Storage = Phase 2.
+- **Change cover** — specified in full under "Book Detail Design Notes (Step 7)" below; it is part of step 7, not a loose idea.
 - `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain.
 - Full "delight" import loading animation/game — Phase 2 polish.
+
+## Book Detail Design Notes (Step 7 — Next)
+Richie's Figma prototype: tap a cover anywhere in the library → a sheet slides over it, the library staying visible and dimmed behind.
+
+**Layout, top to bottom:** cover art full-bleed at the top, **X to close top-right and a 3-dot menu opposite it**; genre chip; title; author; a two-column stat row **YEAR | PAGES**; synopsis paragraph; **MOODS** chips; **BUY THIS BOOK** — one row per retailer (Amazon "Paperback · Kindle", Audible "Audiobook") with a chevron each.
+
+**Build for beta: title, author, year, pages, synopsis, genre.** Everything else is layout-only or later:
+- **Moods do not exist yet.** Moods are *user-created tags* a person applies to a book in their own library — that is step 8's "basic manual shelves and tags", and the same vocabulary the mood quiz (step 9) and Richie's filter chips draw on. Until then the detail view shows **genre only**. When moods arrive they sit next to the genre chip and must be **visually distinguished — a different colour** — because one is publisher metadata and the other is the user's own word for the book.
+- **Buy links: build the placement, not the affiliate wiring.** Affiliate links are Phase 3 per the monetization table. The rows should sit and look as the mockup shows so the eventual swap is cosmetic.
+
+**Nothing is tappable yet.** Cover tiles have no `onTap` in `library_screen.dart` or the `home_screen` rows — there is currently no way to open anything from a cover. Step 7 has to wire that, and #100 (library search) needs the same destination for its results.
+
+**What Google Books actually returns**, measured across 12 books from Margot's set via the search endpoint the app already calls. The single-volume endpoint (`/volumes/{id}`) adds only `printedPageCount` and `dimensions` — **there is no reason to make a second request.**
+
+| Availability | Fields |
+|---|---|
+| **12/12** | `title`, `authors[]`, `description`, `pageCount`, `categories[]`, `imageLinks`, `publishedDate`, `publisher`, `industryIdentifiers` (ISBN), `language`, `printType`, `maturityRating`, `previewLink`/`infoLink`, `accessInfo.webReaderLink` |
+| **9/12** | `subtitle` — often marketing fluff ("A Novel"), occasionally real |
+| **6/12** | `saleInfo.buyLink` (Google Play), `listPrice`, `retailPrice` — e.g. list $18 / retail $9 |
+| **2/12** | `averageRating`, `ratingsCount` |
+
+Ignore as plumbing: `contentVersion`, `readingModes`, `panelizationSummary`, `allowAnonLogging`, `quoteSharingAllowed`.
+
+**Already stored, no work needed:** title, author, **description (the synopsis)**, pageCount, categories → genre, imageLinks → coverUrl. The synopsis is the one Figma element that is already fully in the database.
+
+**⚠️ Google Books ratings are unusable — 2/12, and the single-volume endpoint does not help.** So MVP scope's "rating" in the sidebar is **the user's own rating** of a book they have read, which is a new Firestore field. The scope line was ambiguous; this settles it.
+
+**Buy links — what is actually possible:**
+- **Amazon: constructible from ISBN-10** (`amazon.com/dp/{ISBN_10}`), present 8/9. The one miss is a movie tie-in whose ISBN-13 starts `979`; those have no ISBN-10 equivalent **by design**, not a data gap. Fall back to a search URL on the ISBN-13.
+- **Google Play: free when present** via `saleInfo.buyLink`, but only 6/12.
+- **Audible: nothing.** Google Books returns no audiobook data at all, so the mockup's "Audible / Audiobook" row could only ever be a search link unless another source is added.
+
+The Figma's clean Amazon-and-Audible pair is therefore aspirational, and "Paperback · Kindle" as distinct formats is not something Google tells us either.
+
+**Affiliate links are deliberately deferred past beta.** The *link* is trivial; the *programme* is not. Amazon Associates needs an application, a disclosure notice, and — verify current terms — historically a few qualifying sales within ~180 days of approval or the account is closed. A 20-tester beta is unlikely to clear that bar, so applying early risks burning the application. Build the row, point it at a plain untagged link, and swap in a tagged URL once there is real traffic. Link to the **physical** book's page: linking out to buy physical goods is standard, while external purchase flows for *digital* content stray into Apple's review rules.
+
+**Store ISBN alongside `publishedDate`.** The detail view reads Firestore, not the API, so anything unstored means a fresh request per open. `publisher` (12/12) and `previewLink` (12/12, "Read a sample") are cheap adds worth considering in the same pass.
+
+**Three gaps between the mockup and the data we actually store:**
+- **`publishedDate` is not on `Book` at all.** Google Books returns `volumeInfo.publishedDate` but `fromGoogleBooksJson` drops it, so "YEAR" needs a new field and a Firestore mapping. The format varies — `2018-04-03`, `2018-04`, `2018` — so take the leading four digits rather than parsing a date.
+- **Google's `categories` are far coarser than the mockup.** The Overstory returns `['Fiction']`, not the "Literary Fiction" the Figma shows. Others give `['Young Adult Fiction']`, `['Electronic books']`, or nothing. The genre chip will often read a bland "Fiction" or be absent — design for both.
+- **Year and pages describe the matched *edition*, not the work.** Project Hail Mary's movie tie-in reports 2025 where the original is 2021; The Overstory returns 420 pages where the mockup shows 512. A 2018 novel can legitimately display a 2025 year. Same edition ambiguity as #83 and change-cover.
+
+**Change cover (Bode's design).** The 3-dot menu on the cover — opposite the X — opens options including **Change cover**, which shows the other editions of that book so the user can pick the one matching their physical copy. **Deliberately not part of import**: whatever cover recognition picks is fine at add time, and we advertise that it can be changed afterwards. That is why import can dedupe duplicate editions freely (#83) — editions are re-queried by title+author on demand, never carried through the review queue or stored. `coverUrl` is a single Firestore field, so applying a choice is one overwrite. True custom-photo covers are different: they need Cloud Storage = Phase 2.
 
 ## Key Files
 ```
