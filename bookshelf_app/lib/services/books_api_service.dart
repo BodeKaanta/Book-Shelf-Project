@@ -121,11 +121,14 @@ class BooksApiService {
   }
 
   // Free-text search for the manual search screen — no OCR scoring, just what
-  // the user typed.
+  // the user typed. Editions are collapsed for the same reason as the
+  // recognition path (#109): this is a picker, and you choose a book rather
+  // than an edition. Nothing reranks here, so results arrive in Google's
+  // relevance order and the first of a group is the one to keep.
   Future<List<Book>> searchByText(String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return <Book>[];
-    return await _fetchBooks(trimmed, 10) ?? <Book>[];
+    return _dedupeEditions(await _fetchBooks(trimmed, 10) ?? <Book>[]);
   }
 
   // Google Books primary, Open Library only when Google could not be reached.
