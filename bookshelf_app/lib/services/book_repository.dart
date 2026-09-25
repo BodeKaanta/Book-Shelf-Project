@@ -25,22 +25,12 @@ class BookRepository {
     final existingId = existing['googleBooksId'] as String?;
     if (existingId != null && existingId == book.googleBooksId) return true;
 
-    final title = _titleKey(book.title);
-    if (title.isEmpty || title != _titleKey(existing['title'] as String?)) {
-      return false;
-    }
-    final author = _authorKey(book.author);
-    return author.isNotEmpty && author == _authorKey(existing['author'] as String?);
+    final key = Book.identityKey(book.title, book.author);
+    return key != null &&
+        key ==
+            Book.identityKey(
+                existing['title'] as String?, existing['author'] as String?);
   }
-
-  String _titleKey(String? title) => (title ?? '')
-      .split(':')
-      .first
-      .toLowerCase()
-      .replaceAll(RegExp('[^a-z0-9]'), '');
-
-  String _authorKey(String? author) =>
-      (author ?? '').toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
 
   Future<void> deleteBook(String id) async {
     await _booksCollection.doc(id).delete();
