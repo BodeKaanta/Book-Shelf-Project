@@ -91,6 +91,26 @@ class Book {
     return '$base&fife=w600';
   }
 
+  // Same book, different edition: title before any subtitle, plus author, with
+  // case and punctuation stripped. Editions differ by `googleBooksId`, so the id
+  // is deliberately not part of this. Null when either half is missing — two
+  // books with no author are not evidence of being the same book, and the
+  // library dedup has always required both.
+  static String? identityKey(String? title, String? author) {
+    // Editions announce themselves in parentheses: "Project Hail Mary (Movie
+    // Tie-In)" is the same book as "Project Hail Mary". BooksApiService's
+    // _coreTitle already strips these when scoring, so identity has to agree
+    // or the two halves of the app disagree about what one book is.
+    final core = title?.split(':').first.replaceAll(RegExp(r'\(.*?\)'), '');
+    final titleKey = _identityPart(core);
+    final authorKey = _identityPart(author);
+    if (titleKey.isEmpty || authorKey.isEmpty) return null;
+    return '$titleKey|$authorKey';
+  }
+
+  static String _identityPart(String? value) =>
+      (value ?? '').toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
+
   factory Book.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return Book(

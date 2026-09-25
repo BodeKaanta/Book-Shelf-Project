@@ -42,6 +42,39 @@ void main() {
     });
   });
 
+  group('identityKey', () {
+    test('two editions of one book share a key', () {
+      expect(Book.identityKey('The Overstory', 'Richard Powers'),
+          Book.identityKey('the overstory', 'richard powers'));
+    });
+
+    test('a subtitle does not make it a different book', () {
+      // Google returns "The Dream Hotel" and "The Dream Hotel: A Read with
+      // Jenna Pick" as separate volumes of the same book.
+      expect(Book.identityKey('The Dream Hotel: A Read with Jenna Pick', 'Laila Lalami'),
+          Book.identityKey('The Dream Hotel', 'Laila Lalami'));
+    });
+
+    test('an edition parenthetical does not make it a different book', () {
+      // Google returns the movie tie-in as its own volume with its own cover.
+      // _coreTitle already ignores these when scoring, so identity must too, or
+      // the runner-up is the book itself and the margin collapses again (#83).
+      expect(Book.identityKey('Project Hail Mary (Movie Tie-In)', 'Andy Weir'),
+          Book.identityKey('Project Hail Mary', 'Andy Weir'));
+    });
+
+    test('different books do not collide', () {
+      expect(Book.identityKey('Pines', 'Blake Crouch'),
+          isNot(Book.identityKey('Wayward', 'Blake Crouch')));
+    });
+
+    test('null without an author — two unattributed books are not the same', () {
+      expect(Book.identityKey('Some Title', null), isNull);
+      expect(Book.identityKey(null, 'Some Author'), isNull);
+      expect(Book.identityKey('Some Title', '   '), isNull);
+    });
+  });
+
   test('fromGoogleBooksJson maps the fields the library screens read', () {
     final book = Book.fromGoogleBooksJson({
       'id': 'abc123',

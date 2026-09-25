@@ -28,7 +28,7 @@ class BooksApiService {
     if (query.isEmpty) return (books: <Book>[], query: '', confidence: 0.0);
 
     // Apply OCR corrections first — fall back to original if corrections break the query
-    final correctedQuery = _applyOcrCorrections(query);
+    final correctedQuery = applyOcrCorrections(query);
     List<Book> books;
     String usedQuery;
     final corrected =
@@ -59,14 +59,51 @@ class BooksApiService {
       }
     }
 
-    // Rescore candidates by how closely each title matches the OCR text —
-    // recovers the right book when the title line was garbled but survived elsewhere
-    final reranked = _rerankByFuzzyMatch(books, ocr.lines);
+    final ranked = rankCandidates(books, ocr);
     return (
-      books: reranked,
+      books: ranked.books,
       query: usedQuery,
-      confidence: _confidence(reranked, ocrTokens),
+      confidence: ranked.confidence,
     );
+  }
+
+  // The whole post-fetch half of searchBooks: rescore candidates against the
+  // OCR (#52), collapse duplicate editions (#83), then score the winner. Pure,
+  // so calibration runs against real candidate lists with no network.
+  @visibleForTesting
+  ({List<Book> books, double confidence}) rankCandidates(
+      List<Book> fetched, OcrResult ocr) {
+    final ocrTokens = ocr.lines.expand((l) => _tokens(l.text)).toList();
+    final ranked = _dedupeEditions(_rerankByFuzzyMatch(fetched, ocr.lines));
+    return (books: ranked, confidence: _confidence(ranked, ocrTokens));
+  }
+
+  // Google Books returns several editions of one book in a single result set.
+  // Collapsing them is what lets _confidence's margin mean "how much better
+  // than a *different* book" — against a duplicate it was always 0, capping
+  // every correct match at ~0.70 — and stops the review card offering the same
+  // title three times under "See other matches".
+  List<Book> _dedupeEditions(List<Book> books) {
+    final kept = <Book>[];
+    final seen = <String, int>{};
+    for (final book in books) {
+      final key = Book.identityKey(book.title, book.author);
+      if (key == null) {
+        kept.add(book); // no author to compare — cannot prove a duplicate
+        continue;
+      }
+      final at = seen[key];
+      if (at == null) {
+        seen[key] = kept.length;
+        kept.add(book);
+      } else if (kept[at].coverUrl == null && book.coverUrl != null) {
+        // Ranking already put the best match first, so the first of a group
+        // wins unless a later edition has cover art and it does not —
+        // coverUrl is what gets frozen into Firestore.
+        kept[at] = book;
+      }
+    }
+    return kept;
   }
 
   // 0..1 confidence that the top result is the right book: how well it matches
@@ -272,7 +309,10 @@ class BooksApiService {
     return prev[b.length];
   }
 
-  String _applyOcrCorrections(String query) {
+  // Exposed so the offline calibration in test/ can build the same query
+  // searchBooks sends first.
+  @visibleForTesting
+  String applyOcrCorrections(String query) {
     return query
         // V at word start before a vowel → Y (VEAR→YEAR, VELLOW→YELLOW)
         .replaceAllMapped(

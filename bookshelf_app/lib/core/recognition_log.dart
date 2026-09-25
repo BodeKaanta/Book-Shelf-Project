@@ -34,5 +34,10 @@ void logRecognition({
   final top = books.isEmpty ? null : books.first;
   debugPrint('[REC] top | ${top?.title ?? '(none)'} | ${top?.author ?? '-'}'
       ' | conf=${confidence.toStringAsFixed(2)}');
+  // One per entry behind "See other matches" on the review card, so a
+  // duplicate-edition list is visible in the log and not only on screen.
+  for (final other in books.skip(1)) {
+    debugPrint('[REC] also | ${other.title} | ${other.author ?? '-'}');
+  }
   debugPrint('[REC] end');
 }
