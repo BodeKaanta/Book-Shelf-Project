@@ -358,7 +358,7 @@ The library-search screen opens from **both** the Search tab and a new search ic
 **Implementation notes:**
 - Data is already in Firestore (`watchBooks()` stream is ready) — this step is mostly UI
 - Each cover tile shows the `coverUrl` from the Book model (Google Books thumbnail URL)
-- Mood tags on covers come from the `genre` field — for now display genre as the tag
+- **The genre chip was dropped from the grid (#104).** It used to overlay the cover, standing in for the moods Richie's design shows. Title and author under the cover replaced it: Google's `categories` are usually just "Fiction", so the chip read the same on nearly every tile, the filter chips above already cover genre, and step 7's detail view shows it properly. When moods arrive (step 8) they can return as a chip, designed then.
 - "Capture" bottom nav tab → entry point into capture flow (camera)
 - "Import" bottom nav tab → entry point into batch photo import → feeds approval screen (step 6)
 
@@ -453,7 +453,8 @@ bookshelf_app/lib/
 ├── core/constants.dart              — googleBooksBaseUrl, openLibraryBaseUrl/UserAgent, bookLookupTimeout, autoAddConfidenceThreshold (0.75)
 ├── core/recognition_log.dart        — debug-only [REC] dump: OCR lines + boxes, query, top match, and why a lookup missed. Source of test/fixtures
 ├── models/book.dart                 — Book model, fromGoogleBooksJson + googleCoverUrl (600px, no page-curl), fromOpenLibraryJson, fromFirestore, toFirestore
-├── models/pending_book.dart         — PendingBook: one queued review card (imagePath, candidates, confidence; topGuess/otherMatches/hasResults)
+├── widgets/book_grid_tile.dart       — BookGridTile: one book in a 3-column grid (cover, title, author). Shared so library search (#100) renders identically; `gridAspectRatio` lives here beside the layout it describes
+├── models/pending_book.dart
 ├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult (per-line text + bounding box + imageHeight + isScreenshot). Normalizes iOS's transposed boxes here (#94) so the query builder sees Android geometry
 ├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText. _fetchBooks = Google Books, falling back to Open Library only on timeout/429/5xx
 ├── services/book_repository.dart    — BookRepository: addBook (returns doc id, null if dup), addBooks (one WriteBatch for import), deleteBook, watchBooks. Dedup = same googleBooksId OR same title+author (catches different Google Books editions)
@@ -462,7 +463,7 @@ bookshelf_app/lib/
 ├── providers/books_provider.dart    — booksStreamProvider: StreamProvider<List<Book>> wrapping watchBooks()
 ├── screens/main_scaffold.dart       — 5-tab NavigationBar shell (Home, Search, Capture, Import, Discover) + IndexedStack
 ├── screens/home_screen.dart         — Home screen: Netflix-style rows (Your Library + genre rows) + hamburger drawer
-├── screens/library_screen.dart      — Library screen: 3-column grid, genre filter chips, alphabetical sort
+├── screens/library_screen.dart      — Library screen: 3-column grid of BookGridTile, genre filter chips, alphabetical sort. Sort control still unwired (#101)
 ├── screens/capture_screen.dart      — Capture tab: Take Photo (camera) → single-photo routing → auto-add (snackbar+Undo) / review / duplicate
 ├── screens/import_screen.dart       — Import tab: Choose Photos → routing (progress) → summary popup → review queue
 ├── screens/approval_screen.dart     — Tinder swipe review card (keyed _ReviewCard: drag/animations, see-other-matches, no-OCR/complete states)
