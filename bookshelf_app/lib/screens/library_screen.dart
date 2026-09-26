@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/book.dart';
 import '../providers/books_provider.dart';
+import '../widgets/book_grid_tile.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
@@ -70,11 +70,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                     crossAxisCount: 3,
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,
-                    childAspectRatio: 0.67,
+                    childAspectRatio: BookGridTile.gridAspectRatio,
                   ),
                   itemCount: filtered.length,
                   itemBuilder: (context, index) =>
-                      _GridTile(book: filtered[index]),
+                      BookGridTile(book: filtered[index]),
                 );
               },
             ),
@@ -132,67 +132,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           );
         },
       ),
-    );
-  }
-}
-
-class _GridTile extends StatelessWidget {
-  final Book book;
-
-  const _GridTile({required this.book});
-
-  @override
-  Widget build(BuildContext context) {
-    final url = book.coverUrl?.replaceFirst('http://', 'https://');
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          url != null
-              ? Image.network(
-                  url,
-                  fit: BoxFit.cover,
-                  // Covers are stored at 600px so the detail sidebar has a sharp
-                  // source; decoding every grid tile at that width would hold
-                  // ~2MB each and thrash the 100MB image cache on a full shelf.
-                  cacheWidth: 400,
-                  errorBuilder: (_, _, _) => _placeholder(),
-                )
-              : _placeholder(),
-          if (book.genre != null && book.genre!.isNotEmpty)
-            Positioned(
-              bottom: 6,
-              left: 6,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 3,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  book.genre!,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _placeholder() {
-    return Container(
-      color: Colors.grey[200],
-      child: const Icon(Icons.book, color: Colors.grey, size: 32),
     );
   }
 }

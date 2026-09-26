@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/book.dart';
+import '../widgets/book_grid_tile.dart';
 import '../providers/books_provider.dart';
 import 'library_screen.dart';
 
@@ -157,53 +158,24 @@ class _BookRow extends StatelessWidget {
           )
         else
           SizedBox(
-            height: 180,
+            // The cover keeps its 160 and the caption is measured from the same
+            // constants the tile uses, so the row grows with text scaling.
+            height: 160 + BookGridTile.captionHeight(context),
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: books.length,
-              itemBuilder: (context, index) =>
-                  _CoverTile(book: books[index]),
+              itemBuilder: (context, index) => Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: SizedBox(
+                  width: 110,
+                  child: BookGridTile(book: books[index]),
+                ),
+              ),
             ),
           ),
         const SizedBox(height: 24),
       ],
-    );
-  }
-}
-
-class _CoverTile extends StatelessWidget {
-  final Book book;
-
-  const _CoverTile({required this.book});
-
-  @override
-  Widget build(BuildContext context) {
-    final url = book.coverUrl?.replaceFirst('http://', 'https://');
-
-    return Padding(
-      padding: const EdgeInsets.only(right: 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: url != null
-            ? Image.network(
-                url,
-                width: 110,
-                height: 160,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => _placeholder(),
-              )
-            : _placeholder(),
-      ),
-    );
-  }
-
-  Widget _placeholder() {
-    return Container(
-      width: 110,
-      height: 160,
-      color: Colors.grey[200],
-      child: const Icon(Icons.book, color: Colors.grey, size: 40),
     );
   }
 }
