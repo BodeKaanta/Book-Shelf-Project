@@ -27,7 +27,7 @@ A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App
 | Book Data | **Google Books** (primary; recovered in #81). **Open Library** stays live as a fallback, used only on transport failure — timeout/429/5xx |
 | State Management | Riverpod |
 | Notifications | In-app prompts only (NO push notifications in MVP) |
-| Monetization | Google Play Billing (Pro tier), affiliate links (Phase 3) |
+| Monetization | **Premium — a one-time purchase (~$15, TBC with Richie)** unlocking unlimited books and Richie's themes. Not a subscription: this is a shelf, and people resent renting one. Affiliate links deferred past beta |
 
 ## MVP Scope (Phase 1) — Build This, Nothing Else
 **Capture:**
@@ -48,12 +48,17 @@ A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App
 - In-app housekeeping prompts on app open ("Do you still want this?" / "Did you read it?")
 
 ## NOT in MVP — Do Not Build Yet
-- AI auto-tagging (Phase 2)
+- AI auto-tagging — **moved to "Potential ideas" (Sep 2026)**, no longer a scheduled Phase 2 item
 - Series awareness (Phase 2)
 - External recommendations (Phase 3)
 - Goodreads/StoryGraph import (Phase 3)
 - Social sharing or friend features (Phase 3)
 - iOS-specific *feature* work beyond what shipping a beta build needs (Phase 2). The iOS **build and distribution** path moved up — see "iOS + Beta Distribution". Nothing else from Phase 2 came with it.
+
+## Potential Ideas — Might Never Build
+Distinct from "NOT in MVP", which is deferred but intended. These may never happen, and that is fine. Promote one only if beta users actually ask for it.
+
+- **AI auto-tagging** — an LLM assigning mood tags at ingest. Moved here Sep 2026. **The token cost is not the problem**: at roughly 600 input / 20 output tokens per book, Claude Haiku 4.5 runs about **$0.0007 a book** — ~7¢ for a 100-book library, and one $15 Premium purchase would cover ~21,000 books. The barrier is **infrastructure**: an LLM key cannot ship in a client app (unlike the Books key, it spends real money), so this needs a Cloud Function and Firebase on the **Blaze** plan with a billing account. **The genre already pulled from Google Books is good enough for now** — free, instant, no backend. Revisit only if beta testers say tagging is missing.
 
 ## Critical UX Rules
 - **No push notifications in MVP.** Margot turns off push notifications on almost every app. In-app prompts only, triggered on open.
@@ -63,7 +68,13 @@ A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App
   1. High confidence (≥80%) → auto-add, user never sees it
   2. Low confidence (<80%) → show submitted photo + best guess side by side → Yes = added, No = manual entry
   - Edge case: if Google Books returns no results at all, skip straight to manual entry (no best guess to show)
-- **Free tier:** up to 100 books, 3 shelves. **Pro ($2.99/mo or $19.99/yr):** unlimited books, shelves, mood filters, auto-cat, CSV export, themes.
+- **Monetization — one-time "Premium" unlock, not a subscription (Sep 2026).**
+  - **Free:** up to **100 books** — a *placeholder*. The beta deliberately has **no limit at all**, and testers will be asked how many books feels fair before paying. Set the real number from that data, not from a guess.
+  - **Premium (~$15 one-time, TBC):** unlimited books + themes. Apple and Google take 15–30%.
+  - **Free forever:** tags, filtering, genre, search, sort, auto-add — everything that makes the app work. Users should never be annoyed by something simple being missing.
+  - **Themes are the real incentive**, not storage. Cosmetics sell the way game skins do, and they give Richie a lane after launch. Storage alone only earns from power users — if most people never reach the free limit, nobody pays.
+  - **Undecided:** shelves (the concept needs revisiting post-beta — possibly 3 free then Premium, but decide after seeing how many books people actually store) and CSV export (non-essential, Premium when it exists).
+  - **⚠️ #99 blocks monetization.** Store purchases restore via the Play/Apple account, but the **library does not** — anonymous auth mints a new UID on reinstall. A paying customer would get their unlock back and find an empty shelf. Real accounts are mandatory before charging.
 
 ## Build Order — Follow This Sequence
 1. ✅ Flutter project + Firebase connected + running on physical Android device
@@ -132,7 +143,7 @@ Then check the Build Order section to see the current step. The open issues tell
 ## Firebase / Data Notes
 - AI tagging happens at ingest time only (when a book is added) — NOT at recommendation time
 - Recommendations are served from pre-computed tags/metadata in Firestore — cheap database reads
-- Open-ended AI queries are Pro-only with daily limits (when we get there)
+- If AI features ever land, they need a **Cloud Function** — an LLM key cannot ship in a mobile client, and that means moving Firebase to the **Blaze** plan with a billing account. That infrastructure, not the token cost, is the real barrier (see "Potential ideas").
 - Cloud Storage not used in MVP — book cover art is stored as Google Books API URLs in Firestore, no file storage needed. (Screenshot import doesn't change this: screenshots are matched to a Google Books result and only the cover URL is stored.) Revisit in Phase 2 only if we ever need to keep the user's original photo as a fallback cover.
 
 ## API Keys & Secrets
@@ -476,5 +487,5 @@ bookshelf_app/lib/
 |---|---|---|
 | MVP Build | May–Jul 2026 | Camera capture, visual library, mood quiz, in-app prompts |
 | Beta | Aug–Sep 2026 | 20-50 users, mood tagging, iterate on UX. **Delivered via iOS TestFlight** — every tester who agreed is an iOS user, so the iOS build path moved up from Phase 2. See "iOS + Beta Distribution" |
-| Launch v1.0 | Oct 2026 | Google Play, free + Pro tiers live — complete the pre-launch security steps in "API Keys & Secrets" first (App Check + key restrictions) |
-| Phase 2 | Q1 2027 | iOS *feature* parity + polish (the build path landed early for beta), AI auto-tagging, social sharing |
+| Launch v1.0 | Oct 2026 | Google Play, free + **Premium one-time unlock** live — complete the pre-launch security steps in "API Keys & Secrets" first (App Check + key restrictions), and **#99 (real accounts) is a hard prerequisite**: charging for storage while the library can vanish on reinstall is a refund waiting to happen |
+| Phase 2 | Q1 2027 | iOS *feature* parity + polish (the build path landed early for beta), themes, social sharing. AI auto-tagging is no longer scheduled here — see "Potential Ideas" |
