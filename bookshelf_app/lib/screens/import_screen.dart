@@ -10,11 +10,38 @@ class ImportScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final importing = ref.watch(importProvider.select((s) => s.importing));
+    final reviewCount = ref.watch(importProvider.select((s) => s.reviewCount));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Import')),
-      body: Center(
-        child: importing ? _buildProgress(ref) : _buildStart(context, ref),
+      body: importing
+          ? Center(child: _buildProgress(ref))
+          : Column(
+              children: [
+                if (reviewCount > 0) _buildPendingReview(context, reviewCount),
+                Expanded(child: Center(child: _buildStart(context, ref))),
+              ],
+            ),
+    );
+  }
+
+  // The queue outlives the summary dialog — importProvider is not autoDispose —
+  // so dismissing it with "Later" only hid the way back in. Clears itself as the
+  // queue drains, since approving and rejecting both pop entries.
+  Widget _buildPendingReview(BuildContext context, int count) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: ListTile(
+          leading: const Icon(Icons.rate_review_outlined),
+          title: Text('$count ${count == 1 ? 'book needs' : 'books need'} review'),
+          subtitle: const Text("Confirm the ones we weren't sure about"),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ApprovalScreen()),
+          ),
+        ),
       ),
     );
   }
