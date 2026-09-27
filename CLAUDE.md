@@ -255,7 +255,9 @@ The policy describes **current** behaviour on purpose, including two unflatterin
 
 **"Built" is not "uploaded", and conflating them wasted a session.** `flutter build ipa` produced build 1's IPA on the Mac in early September, and release builds have run on the iPad — those are builds. Transmitting a binary to Apple is a separate step that has not happened. Build 1 is stale regardless: it predates #83, #104, #105 and #109.
 
-`version:` is still `1.0.0+2`. **Bump to `+3` before the next build** — Apple rejects a reused build number outright.
+`version:` is **`1.0.0+3`** (bumped in #118). Apple rejects a reused build number outright, so bump the `+N` again after every upload.
+
+**Accepted:** the Apple Developer Program License Agreement (27 Sep). **Still empty as of 27 Sep: App Information and App Privacy** — both are gates on external TestFlight, not optional polish.
 
 Remaining gates on the **external** (public-link) TestFlight track:
 
@@ -271,6 +273,54 @@ Remaining gates on the **external** (public-link) TestFlight track:
 Internal testing needs neither the review nor the policy — only a build and testers who are App Store Connect users.
 
 **Tester notes must carry the #99 warning**: the library is device-local, so deleting the app may lose it. Without that, reinstall data-loss gets reported as a bug and contaminates the recognition feedback the beta exists to collect.
+
+### Mac session runbook — uploading a build
+
+**Read this before touching the Mac.** The session happens on a borrowed MacBook (`/Users/suvikaanta/dev/Book-Shelf-Project`) under time pressure. Target: build uploaded and processed **before** the release meeting, so the meeting is one button and not a debugging session.
+
+**Carry with you.** `.env` into `bookshelf_app/` — it is gitignored, so a fresh clone will not have it, and without it every Google Books lookup 429s into the Open Library fallback. The `.p8` is **not** needed: it is for Codemagic, and Xcode signs via an Apple ID login instead.
+
+**Do first, before anything else.** Sign Xcode in: **Xcode → Settings → Accounts → +**. Verify with:
+```
+security find-identity -v -p codesigning
+```
+At least one **"Apple Distribution"** line must appear. Zero means `flutter build ipa` will archive successfully and *then* fail at export with `No Accounts` / `No signing certificate "iOS Distribution" found`. Device builds keep working the whole time — an `Apple Development` certificate is already in the keychain — so nothing warns you until the last step, which is the most demoralising way to lose an hour.
+
+**Then, in order:**
+```
+git pull
+cd bookshelf_app
+flutter pub get
+cd ios && pod install && cd ..
+flutter build ipa --dart-define-from-file=.env
+```
+First `pod install` on a clean machine downloads the Firebase and ML Kit pods with no cache — **budget 10–25 minutes** and start it early.
+
+**⚠️ Never Xcode's Archive button.** It does not pass the dart-define, and `main()`'s assert is stripped in release, so the build fails *silently*: recognition still half-works via the fallback and nothing explains why. Always the `flutter build ipa` line above.
+
+**Upload** through Xcode Organizer rather than the CLI — it can create a missing distribution certificate interactively:
+```
+open build/ios/archive/Runner.xcarchive
+```
+Distribute App → App Store Connect → Upload. Then watch **App Store Connect → TestFlight → Builds**; processing takes 5–30 minutes and Apple emails when it finishes. Export compliance should **not** be asked, because `ITSAppUsesNonExemptEncryption` is already in `Info.plist`.
+
+**Known failure modes — recognise these rather than re-diagnosing them:**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `No signing certificate "iOS Distribution" found` at export | Xcode not signed in | Settings → Accounts → + |
+| Recognition degrades to Open Library in the shipped build | dart-define missing — Archive button used | Rebuild with `flutter build ipa --dart-define-from-file=.env` |
+| `pod install` rejects platform 15.5 | ML Kit demanding higher | Raise it in `ios/Podfile` **and** `IPHONEOS_DEPLOYMENT_TARGET` together — they must match |
+| "can only be launched from Flutter tooling" on the device | Normal for debug: the JIT needs a debugger attached | `flutter run --release --dart-define-from-file=.env -d <id>` |
+| Build number rejected as already used | `version:` not bumped | Bump the `+N` in `pubspec.yaml` |
+| Simulator build fails to link ML Kit | No arm64 simulator slices exist | Physical device only — this is not fixable |
+
+**Submitting (the meeting itself):** TestFlight → create an **External** group → add the build → **Submit for Beta App Review**. 24–48h on the first build of a version. Do **not** use "Submit for Review" on the Distribution tab — that is a real App Store submission. The public link is created once and never changes, so later builds need no new link and usually no new review.
+
+**What this beta knowingly ships with**, so nobody treats these as surprises:
+- **#99** — the library is device-local. The tester notes must say so.
+- **#93** — an unreproduced iOS crash. Shipping to TestFlight is *progress* on it, not a risk being hidden: TestFlight uploads dSYMs, so any recurrence arrives symbolicated, which is exactly what #93 is blocked on.
+- **iPad** — `TARGETED_DEVICE_FAMILY` is still `"1,2"`. Irrelevant to TestFlight, which needs no screenshots. Decide before the store listing, because keeping it forces a second screenshot set and puts the stretched tablet layout in front of App Review.
 
 ## Recognition Status (as of Sep 2026)
 Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Google Books search** (Open Library on transport failure) → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
