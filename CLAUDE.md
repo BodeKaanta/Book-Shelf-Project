@@ -236,9 +236,41 @@ flutter run --release --dart-define-from-file=.env -d <device-id>
 
 Windows cannot build iOS at all: Xcode and codesigning are macOS-only, and a macOS VM on non-Apple hardware violates Apple's licence. **Codemagic is the only genuine Mac-free path** and is what removes the dependency on a borrowed laptop.
 
-**The privacy policy must be a public URL, not a document.** App Store Connect will not accept a file — it has to be reachable by reviewers and testers without a login. GitHub Pages off this repo is the natural fit: free, versioned with the code, and editable from Windows. It and the separate App Privacy questionnaire are the two remaining gates on the **external** (shareable-link) TestFlight track; internal testing needs neither.
+**The privacy policy is live, and it lives in a second repo.** App Store Connect will not accept a file — it must be reachable without a login. **GitHub Pages requires a *public* repo on the free plan and `Book-Shelf-Project` is private**, so the public pages live in **`BodeKaanta/bookedex-site`** instead: public, no app code, and deliberately **no licence**, so the text stays all-rights-reserved and readable rather than reusable.
 
-**Not yet done:** Codemagic setup, privacy policy URL, App Privacy answers, first TestFlight upload.
+| Page | URL | Used as |
+|---|---|---|
+| Privacy policy | `https://bodekaanta.github.io/bookedex-site/privacy/` | App Store Connect **Privacy Policy URL** |
+| Landing / support | `https://bodekaanta.github.io/bookedex-site/` | App Store Connect **Support URL** (also required, easy to forget) |
+
+The policy describes **current** behaviour on purpose, including two unflattering facts that stay until they stop being true: photos never leave the device but the **text recognised from them does** (sent to Google Books as a search query), and libraries are tied to an installation rather than an account (#99), so a deletion request cannot be matched to a user. **Change the policy in the same PR that changes what the app collects** — Apple's App Privacy questionnaire and Google Play's Data Safety form are both checked against it, and they drift apart the moment this is treated as follow-up work.
+
+**App Privacy questionnaire answers** (derived from `Book.toFirestore`, so they match the code rather than the marketing): collect data = **yes**; *Identifiers → User ID* (the anonymous UID) and *User Content → Other User Content* (the saved library), both **linked**, both **App Functionality**, neither used for tracking. **Do not declare Photos** — Apple excludes data processed only on-device, and declaring them would contradict the policy. **Do not declare Diagnostics** — there is no crash reporting yet; that changes the day Crashlytics lands.
+
+**A handoff document for Richie** covers the App Store Connect work that needs no code: `C:\dev\bookedex-storefront-handoff.md` (plus an `.html` twin). It is a **static copy** — sending it again is the only way to update his. Two items in it are Bode's alone because they are legal acts in his name: accepting the Apple Developer Program License Agreement (at **developer.apple.com/account**, not App Store Connect) and setting EU trader status.
+
+### Beta status — 27 Sep 2026
+
+**Nothing has ever been uploaded to App Store Connect.** The TestFlight → Builds list reads "No Builds".
+
+**"Built" is not "uploaded", and conflating them wasted a session.** `flutter build ipa` produced build 1's IPA on the Mac in early September, and release builds have run on the iPad — those are builds. Transmitting a binary to Apple is a separate step that has not happened. Build 1 is stale regardless: it predates #83, #104, #105 and #109.
+
+`version:` is still `1.0.0+2`. **Bump to `+3` before the next build** — Apple rejects a reused build number outright.
+
+Remaining gates on the **external** (public-link) TestFlight track:
+
+| Gate | Where | Needs |
+|---|---|---|
+| Upload a build | Mac or Codemagic | **The only hard blocker** — Windows cannot produce one |
+| App Information URLs + category | App Store Connect | Nothing; both URLs are live above |
+| App Privacy questionnaire | App Store Connect | Nothing; answers are recorded above |
+| Age rating questionnaire | App Store Connect | Nothing |
+| TestFlight Test Information | App Store Connect | Nothing to write it; a build to act on it |
+| External tester group → Beta App Review | App Store Connect | An uploaded, processed build |
+
+Internal testing needs neither the review nor the policy — only a build and testers who are App Store Connect users.
+
+**Tester notes must carry the #99 warning**: the library is device-local, so deleting the app may lose it. Without that, reinstall data-loss gets reported as a bug and contaminates the recognition feedback the beta exists to collect.
 
 ## Recognition Status (as of Sep 2026)
 Pipeline: ML Kit OCR (bundled on-device model) → query builder → **Google Books search** (Open Library on transport failure) → fuzzy rerank → confidence score. Recognition is driven by the Import flow; the POC dev screen was removed in #45.
