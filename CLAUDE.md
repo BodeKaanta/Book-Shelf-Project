@@ -324,6 +324,10 @@ Distribute App → App Store Connect → Upload. Then watch **App Store Connect 
 | Build number rejected as already used | `version:` not bumped | Bump the `+N` in `pubspec.yaml` |
 | Simulator build fails to link ML Kit | No arm64 simulator slices exist | Physical device only — this is not fixable |
 
+**Shipping any change means a whole new build — there is no over-the-air update.** Flutter release builds are AOT-compiled into the binary and Apple forbids downloading executable code, so a one-line colour tweak costs exactly what a feature does: bump the `+N`, rebuild **on a Mac**, upload, wait for processing. Apple's review is *not* the expensive part (internal testers get it as soon as it processes; a later build at the same version usually skips full review) — **Mac access is**. Batch up whatever you want in a beta before giving the laptop back, or set up Codemagic.
+
+**Write the Dart on Windows; use the Mac only to build.** Theme, layout and recognition changes are platform-agnostic and iterate far faster on the Pixel with hot reload — the Mac's scarce value is producing an iOS binary, not editing code. Using it as an editor wastes the one thing it is needed for. After a `git pull` the Mac session is about ten minutes: `flutter pub get`, bump `version:`, `flutter build ipa --dart-define-from-file=.env`, Organizer. **`pod install` is only needed when dependencies change** — a UI change does not need it, which is most of the runbook's time budget gone.
+
 **Distribute App is not the beta review, and three similarly-named buttons do three different things:**
 
 | Button | Where | What it does |
@@ -393,9 +397,18 @@ Earlier figures, different sets: initial clean-photo pass 9/12; a harder real-wo
 
 **The figures above are Android-derived.** iOS has now been measured separately — see "iOS recognition" below. ML Kit ships a *different* SDK build on iOS and the two do **not** behave the same, so never assume an Android number transfers. The iOS Simulator is not a substitute for a device: ML Kit ships no arm64 simulator slices at all.
 
-### iOS recognition — measured Sep 2026, and the transposition bug (#94)
+### iOS recognition — measured Sep 2026, re-measured 28 Sep, and the transposition bug (#94)
 
-**iOS lands at 14/19 correct** on Margot's set imported on the iPad, against Android's 16/20. Comparable overall, but a *different* failure set.
+**iOS lands at 13-14/19 correct** on Margot's set imported on the iPad (re-measured 28 Sep on build 4), against Android's 16/20. Comparable overall, but a *different* failure set.
+
+**Correct is flat since the first measurement; confidence is not.** Ten books now auto-add at >=0.75 where six did before, because #83 closed -- the margin term no longer collapses when Google Books returns several editions of the same book. Overstory 0.82, Invisible Cities 0.88, Dream Hotel 0.87, Aldo Rossi 0.87, Authority 0.81, Transformed 0.86, Unbecoming 1.00. In the first measurement most correct books were pinned at exactly 0.70. That is a real change in what a user sees: ten silent adds instead of six.
+
+| Measured on the iPad | Sep | 28 Sep |
+|---|---|---|
+| Correct | 14/19 | 13-14/19 |
+| Auto-added (>=0.75) | 6 | **10** |
+
+*House of Government* now lands at **0.74** -- correct, one point under the threshold, so it routes to review. *Gardener's Guide to Botany* returned author **Paul R Wonning** where the earlier run gave **Scott Zona**; same title, possibly a different book, worth checking against the cover. It scores 0.53 so it goes to review rather than auto-adding.
 
 **The bug that was hiding it: ML Kit on iOS returns transposed bounding boxes.** iOS reports text frames in the photo's **unrotated buffer**, so any photo carrying EXIF rotation arrives with every box's axes swapped — a 37-character line of cover text measuring 69 wide by 458 tall. `_isRotated` then reads it as a neighbouring book's spine (the #78 rule) and drops it, so almost every line of a rotated cover was discarded and the query built from scraps. **10 of 19 photos were affected.**
 
@@ -411,9 +424,15 @@ Queries went `sci` → `INVISIBLE CITIES ITALO CALVINO`, `THE` → `CASTLE JOHN 
 
 **⚠️ This is an iOS SDK behaviour, and the gate is now iOS-only (#105).** Android's ML Kit applies the rotation itself, so its boxes are already correct and must never be touched. The gate used to run on both, and on a photo carrying several neighbouring **spines** the majority vote went the wrong way: Invisible Cities transposed a good Android photo, `_isRotated` then discarded its cover text as spine, and it scored **0.00 where it had scored 0.70**. `extractTextFromImage` now gates on `Platform.isIOS`.
 
-**The heuristic itself is still wrong — #107, iOS only.** Five spines outvote three lines of cover text. Harmless on Android now; still live on iOS, and unverifiable from Windows because there are **no iOS OCR fixtures** and an iOS build needs the Mac. Capture iOS fixtures first, then fix. Weighting the vote by box area is the likely answer (titles are the largest text, spines are thin); deciding from EXIF/image dimensions rather than text geometry would be better still, since transposition is a property of the image, not of the words in it.
+**The heuristic's shape is still wrong in principle, but #107 is closed as not planned (28 Sep).** Equal weight per line will mis-handle a photo that legitimately contains vertical text -- but it is not wrong on any real photo we have. Measured on the Mac against a 19-photo import: **the gate fired on 0 of 19**, and an area-weighted vote, implemented and replayed against the same captured data, gave an **identical verdict on all 19**. Not even the 28-line shelf photo triggers it.
 
-**The gate now has a real two-sided test (#105).** It previously had none: it was recorded here that `test/fixtures/ocr_fixtures.dart` is its regression test, which was false — those fixtures hold this step's **output**, and every other test feeds them straight into `books_api_service`, so `_transposeBoxes` never executed. That false confidence is exactly how #105 survived. `test/book_recognition_service_test.dart` now asserts both directions by calling the decision directly: no real photo is transposed on Android, and axis-swapped copies of those same fixtures still are on iOS. It also pins the #107 limitation with an assertion that should **invert** when that is fixed.
+The worked example the issue was built on no longer exists. Invisible Cities was described as five spine lines outvoting three cover lines; today it OCRs as nine lines whose three cover lines match verbatim (`INTRODUCTION BY ANTHONY DOERR`, `INVISIBLE CITIES`, `ITALO CALVINO`, all far wider than tall) with **the spines absent**, and resolves correctly at **0.88** rather than the 0.00 recorded there.
+
+**The real blocker turned out to be the opposite of what was assumed.** #107 said the work was blocked on lacking a Mac. With a Mac it is blocked on there being **no photo where transposition legitimately *should* fire** -- so no change can be shown to preserve what #94 fixed, and editing it means changing code untestable in either direction.
+
+**Reopen only if a shelf photo produces a query built from neighbouring books' spines.** That is the symptom. The first thing to try is ranking boxes by area and sampling the largest three (titles are the largest text on a cover, spines are thin); deciding from EXIF/image dimensions rather than text geometry would be better still, since transposition is a property of the image, not of the words in it.
+
+**The gate now has a real two-sided test (#105).** It previously had none: it was recorded here that `test/fixtures/ocr_fixtures.dart` is its regression test, which was false — those fixtures hold this step's **output**, and every other test feeds them straight into `books_api_service`, so `_transposeBoxes` never executed. That false confidence is exactly how #105 survived. `test/book_recognition_service_test.dart` now asserts both directions by calling the decision directly: no real photo is transposed on Android, and axis-swapped copies of those same fixtures still are on iOS. It also pins the vote's known shape with an assertion that documents it deliberately -- that assertion **stays**, since #107 is closed not planned; invert it only if the symptom above ever appears.
 
 **`_transposeBoxes` is a reflection, not a true rotation.** It reliably corrects the aspect ratio, which is what `_isRotated` keys on, but reading order may come out bottom-to-top on some photos. Per #78 order matters for a title split over several lines. Not observed to bite yet; suspect it first if a multi-line title scrambles while single-line titles work.
 

@@ -85,12 +85,14 @@ class BookRecognitionService {
   bool shouldTranspose(List<OcrLine> lines, {required bool isIOS}) =>
       isIOS && _hasTransposedBoxes(lines);
 
-  // KNOWN LIMITATION, iOS only (#107): a majority vote over every sampled line is the
-  // wrong shape when a photo legitimately contains vertical text. Five spines
-  // outvote three lines of cover text. Harmless on Android now that the gate
-  // never runs there; still live on iOS, and unfixable here without a Mac to
-  // verify against. Weighting the vote by box area is the likely fix -- the
-  // title and author are the largest text, spines are thin.
+  // A majority vote over every sampled line is the wrong shape in principle
+  // when a photo legitimately contains vertical text: spines outvote cover
+  // text. Measured on a Mac against a 19-photo iPad import though, this fired
+  // on 0 of 19, and an area-weighted vote agreed on all 19 -- so #107 closed
+  // not planned rather than fixed. Reopen only if a shelf photo produces a
+  // query built from neighbouring books' spines; ranking boxes by area and
+  // sampling the largest three is the first thing to try, since the title and
+  // author are the largest text and spines are thin.
   bool _hasTransposedBoxes(List<OcrLine> lines) {
     final sample = [
       for (final line in lines)
