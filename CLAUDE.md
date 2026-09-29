@@ -151,7 +151,11 @@ Then check the Build Order section to see the current step. The open issues tell
 - The Open Library fallback is keyless, so it keeps working without the flag — which means a keyless build degrades to the fallback rather than failing outright. Do not rely on that.
 - **Honest threat model:** any key shipped in a client app is extractable — dart-define is obfuscation, not protection. The real security control is console-side: in Google Cloud Console, restrict the key to the Books API only and cap its daily quota. Books API is free with no billing attached, so a leaked key can only waste quota — no money or data at risk.
 - The Firebase keys in `firebase_options.dart` / `google-services.json` are identifiers, not secrets — safe to commit. Data access is enforced by Firestore security rules, not by hiding these keys.
-- **Before public launch:** enable Firebase App Check, and add Android package name + SHA-1 restrictions to the Firebase API keys AND the Books API key in Google Cloud Console.
+- **⚠️ The shipped iOS build carries the Books API key, extractable.** Verified 28 Sep by unzipping the uploaded IPA: `.env` is **not** bundled, no `.p8`, no keystore, no private keys — but the key itself sits as a plain string in `Frameworks/App.framework/App`, findable with `strings`. That is what dart-define does: it keeps the key out of a readable file, then compiles it into the binary. Unavoidable for any client-side key; the only true fix is proxying through a Cloud Function.
+- **What a stolen key can do is the thing that matters, and here it is bounded:** Books API is free with no billing attached, so the worst case is quota exhaustion, which degrades recognition to the Open Library fallback. No money and no user data at risk. That is why this is an accepted trade rather than an exposure.
+- **Before testers get the build** (not "before public launch" — external TestFlight is distribution), restrict the Books API key in Google Cloud Console: **API restriction** → Books API only; **Application restriction** → **iOS apps → bundle ID `com.bookedex.app`**; and a **daily quota cap**. iOS bundle-ID restrictions are spoofable by a determined attacker, so the quota cap is the real backstop. **This is console-side and independent of any build** — it applies to every client using the key the moment it is saved, so it needs no rebuild and can be done from Windows.
+  - ⚠️ **A typo in the bundle ID breaks recognition silently**: every lookup is rejected and falls through to the Open Library fallback, which still half-works, so nothing announces the mistake. Same failure shape as a missing dart-define. Import a photo immediately after applying and confirm books still resolve.
+- **Before public launch:** enable Firebase App Check, and add the **Android** package name + SHA-1 restrictions too. The Android half was the only one recorded here until 28 Sep, written when Android was shipping first — iOS shipped first in the end, so following this list literally would have left the shipping platform unrestricted.
 - Never commit secrets to git. If a real secret is ever needed (paid API, etc.), it belongs behind a Cloud Function — never in the app.
 
 ## Release Builds (Android)
@@ -255,11 +259,11 @@ The policy describes **current** behaviour on purpose, including two unflatterin
 
 ### Beta status — 28 Sep 2026
 
-**Build `1.0.0 (4)` is uploaded and processed in App Store Connect.** TestFlight → Builds shows it Complete. That is the first binary this project has ever sent to Apple, and it ends the Mac-only part of the beta.
+**Build `1.0.0 (5)` is uploaded to App Store Connect**, and `1.0.0 (4)` before it. Build 4 was the first binary this project ever sent to Apple and ended the Mac-only part of the beta; build 5 adds the icon-palette theme (#126). Build 4 stays in TestFlight as a fallback.
 
 **"Built" is not "uploaded", and conflating them wasted a session.** A local `flutter build ipa` is a build; transmitting the binary is a separate step. Builds 1 and 3 were both produced locally and never sent — 3 was archived and then found to crash (#120), so it must never be uploaded.
 
-`version:` is **`1.0.0+4`** (bumped in #122). Apple rejects a reused build number outright, so bump the `+N` again after every upload — including after a build that was only ever archived locally.
+`version:` is **`1.0.0+5`** (bumped in #128). Apple rejects a reused build number outright, so bump the `+N` again after every upload — including after a build that was only ever archived locally, as build 3 was.
 
 **Accepted:** the Apple Developer Program License Agreement (27 Sep). **Still empty as of 27 Sep: App Information and App Privacy** — both are gates on external TestFlight, not optional polish.
 
@@ -267,7 +271,7 @@ Remaining gates on the **external** (public-link) TestFlight track:
 
 | Gate | Where | Needs |
 |---|---|---|
-| ~~Upload a build~~ | Mac | ✅ **Done 28 Sep — `1.0.0 (4)`.** Every remaining gate is App Store Connect web work and can be finished from Windows |
+| ~~Upload a build~~ | Mac | ✅ **Done 28 Sep — `1.0.0 (4)`, then `1.0.0 (5)` with the theme.** Every remaining gate is App Store Connect web work and can be finished from Windows |
 | App Information URLs + category | App Store Connect | Nothing; both URLs are live above |
 | App Privacy questionnaire | App Store Connect | Nothing; answers are recorded above |
 | Age rating questionnaire | App Store Connect | Nothing |
