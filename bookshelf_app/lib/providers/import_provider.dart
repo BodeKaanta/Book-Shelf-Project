@@ -64,6 +64,12 @@ class ImportNotifier extends StateNotifier<ImportState> {
 
   BookRepository get _repo => _ref.read(bookRepositoryProvider);
 
+  @override
+  void dispose() {
+    _recognition.dispose();
+    super.dispose();
+  }
+
   // The OS picker/camera runs as its own activity, so our activity resumes and
   // renders frames again *before* the picked files arrive over the platform
   // channel. Showing the loader up front stops the start screen flashing in
@@ -105,7 +111,8 @@ class ImportNotifier extends StateNotifier<ImportState> {
       confidence: result.confidence,
     );
 
-    final isConfident = result.confidence >= autoAddConfidenceThreshold &&
+    final isConfident =
+        result.confidence >= autoAddConfidenceThreshold &&
         result.books.isNotEmpty;
     if (isConfident) return result.books.first;
 
