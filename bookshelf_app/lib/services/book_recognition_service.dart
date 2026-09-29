@@ -26,28 +26,39 @@ class OcrResult {
 }
 
 class BookRecognitionService {
+  // One recognizer for the life of the service, not one per photo. Constructing
+  // and tearing one down per image crashed a 19-photo import on iOS (#120):
+  // ML Kit's shared analytics logger died in -[MLKAnalyticsLogger
+  // synchronizeUserDefaults] sending `synchronize` to a freed object whose
+  // address had been reused. Four photos survived, nineteen did not. Reuse is
+  // also ML Kit's intended usage -- constructing a recognizer loads the OCR
+  // model, so the old code reloaded it once per photo.
+  TextRecognizer? _recognizer;
+
+  TextRecognizer get _textRecognizer => _recognizer ??= TextRecognizer();
+
   Future<OcrResult> extractTextFromImage(XFile image) async {
-    final recognizer = TextRecognizer();
-    try {
-      final inputImage = InputImage.fromFilePath(image.path);
-      final recognizedText = await recognizer.processImage(inputImage);
+    final inputImage = InputImage.fromFilePath(image.path);
+    final recognizedText = await _textRecognizer.processImage(inputImage);
 
-      final lines = [
-        for (final block in recognizedText.blocks)
-          for (final line in block.lines) OcrLine(line.text, line.boundingBox),
-      ];
+    final lines = [
+      for (final block in recognizedText.blocks)
+        for (final line in block.lines) OcrLine(line.text, line.boundingBox),
+    ];
 
-      final (width, height) = await _imageDimensions(image);
-      final transposed = shouldTranspose(lines, isIOS: Platform.isIOS);
+    final (width, height) = await _imageDimensions(image);
+    final transposed = shouldTranspose(lines, isIOS: Platform.isIOS);
 
-      return OcrResult(
-        lines: transposed ? _transposeBoxes(lines) : lines,
-        imageHeight: transposed ? width : height,
-        isScreenshot: _isScreenshot(width, height),
-      );
-    } finally {
-      await recognizer.close();
-    }
+    return OcrResult(
+      lines: transposed ? _transposeBoxes(lines) : lines,
+      imageHeight: transposed ? width : height,
+      isScreenshot: _isScreenshot(width, height),
+    );
+  }
+
+  Future<void> dispose() async {
+    await _recognizer?.close();
+    _recognizer = null;
   }
 
   // ML Kit on iOS returns frames in the photo's unrotated buffer, so an
