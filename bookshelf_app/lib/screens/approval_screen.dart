@@ -394,7 +394,24 @@ class _ReviewCardState extends State<_ReviewCard>
           alignment: stamp.align,
           child: Opacity(
             opacity: stamp.opacity,
-            child: Icon(stamp.icon, size: 72, color: stamp.color),
+            // These glyphs knock the check and cross out of a filled disc, so
+            // without a backing the symbol is just whatever photo is behind it.
+            // The disc is about 60 across at size 72, so 64 fills the cut-out
+            // and leaves a hairline rim rather than a heavy ring.
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                Icon(stamp.icon, size: 72, color: stamp.color),
+              ],
+            ),
           ),
         ),
       ),
@@ -509,7 +526,10 @@ class _ReviewCardState extends State<_ReviewCard>
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        // Low rather than Highest: the container tones carry the seed hue, and
+        // at Highest the pill went pale red under the same tint as the buttons
+        // sitting on it.
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
