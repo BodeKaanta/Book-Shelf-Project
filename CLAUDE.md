@@ -174,6 +174,51 @@ The dart-define is **mandatory again (#81)** — Google Books is primary and nee
 
 **Play requirements already met:** `targetSdk`/`compileSdk` 36, `minSdk` 24, `applicationId` `com.bookedex.app`, label "Bookedex". The **store-listing** icon must be exactly 512×512 — the source art is 513×513 and will be rejected until resized.
 
+## Release Builds (iOS)
+```
+flutter build ipa --dart-define-from-file=.env
+```
+**⚠️ Never Xcode's Archive button.** It does not pass the dart-define, and `main()`'s assert is stripped in release, so the build fails *silently* exactly as the Android trap does: every lookup 429s, recognition half-works through the Open Library fallback, and nothing explains why. Always the line above.
+
+**Signing:** Xcode must have an Apple ID signed in (**Xcode → Settings → Accounts → +**; Settings is in the macOS **menu bar**, ⌘, — the Welcome window offers only create/clone/open and looks like it has none). Without it the build archives successfully and *then* fails at export with `No Accounts` / `No signing certificate "iOS Distribution" found`. Device builds keep working throughout, because an `Apple Development` certificate is in the keychain — so nothing warns you until the last step.
+
+**⚠️ `security find-identity` is the wrong check and will mislead you.** It printed `Apple Distribution: 0` before the sign-in, after it, and immediately after a successful export. The certificate is **Cloud Managed**, fetched on demand at export and never written to the local keychain.
+
+**Verify signing the same way the Android build verifies its keystore** — the iOS analogue of `keytool -printcert`:
+```
+grep -o "Cloud Managed Apple Distribution\|Apple Development" build/ios/ipa/DistributionSummary.plist | sort -u
+```
+Every component must read **`Cloud Managed Apple Distribution`**, never `Apple Development`. `build/ios/ipa/ExportOptions.plist` should show `app-store-connect` and team `X85MDRLFL6`.
+
+**Every upload needs a higher build number** — the `+N` in `pubspec.yaml`. Apple rejects a reuse outright, and a number counts as spent even if that build was only archived locally and never sent (build 3 was). Confirm the archive really is the build you think:
+```
+/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" \
+  build/ios/archive/Runner.xcarchive/Info.plist
+```
+Check the IPA's timestamp too — a failed export leaves the *previous* build's `.ipa` sitting in place, which is easy to mistake for a fresh one.
+
+**Upload through Xcode Organizer**, not the CLI — it handles auth with the signed-in Apple ID and reports errors far more clearly:
+```
+open build/ios/archive/Runner.xcarchive
+```
+Distribute App → App Store Connect → Upload → Automatically manage signing. Organizer lists every archive and they look near-identical; **check the version column** before distributing.
+
+**Expect five `Upload Symbols Failed — no dSYM` warnings** for `FirebaseFirestoreInternal`, `absl`, `grpc`, `grpcpp` and `openssl_grpc`. **Benign** — Firebase ships those prebuilt with symbols stripped. Our own `Runner.app`, `App.framework` and `Flutter.framework` dSYMs do upload, which is why the #120 crash report symbolicated cleanly. Do not investigate them again.
+
+**Export compliance** is already declared by `ITSAppUsesNonExemptEncryption` in `Info.plist`, so App Store Connect should not ask. If it does, something is wrong with the plist.
+
+**Check what actually ships** before handing the build to anyone:
+```
+unzip -q build/ios/ipa/Bookedex.ipa -d /tmp/ipacheck && find /tmp/ipacheck -name "*.env" -o -name "*.p8" -o -name "*.jks"
+```
+Must return nothing. Note the Books API key itself *is* in `Frameworks/App.framework/App` and is extractable — see "API Keys & Secrets" for why that is an accepted trade and what to restrict.
+
+**Icon:** `remove_alpha_ios: true` + `background_color_ios: "#EA3442"`. **The App Store rejects icons carrying an alpha channel** — verify the PNG colour-type byte at offset 25 is `2` (RGB), not `6` (RGBA).
+
+**Still outstanding for the store listing** (neither blocks TestFlight): the **launch image** is still Flutter's placeholder, so testers see a generic launch screen; and `TARGETED_DEVICE_FAMILY` is still `"1,2"`, which forces a second screenshot set and puts the stretched tablet layout in front of App Review. Decide the iPad question before the listing, not after.
+
+**A release build needs its own smoke test on a device.** The Android section says this for R8; it holds on iOS for a different reason — ML Kit ships **no arm64 simulator slices**, so the Simulator cannot run recognition at all and a physical device is the only option. Testing build 3 on the iPad is what caught #120 before it reached testers.
+
 ## iOS + Beta Distribution (Aug–Sep 2026)
 **Why iOS moved up.** Every beta tester who agreed to test is an iOS user; Bode and Richie are both Android. There is literally nobody to hand an Android beta to, so the iOS build path came forward from Phase 2. Nothing else from Phase 2 came with it.
 
