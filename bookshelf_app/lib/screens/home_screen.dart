@@ -25,9 +25,11 @@ class HomeScreen extends ConsumerWidget {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(color: Color(0xFF4A3728)),
-              child: Text(
+            DrawerHeader(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              child: const Text(
                 'Bookedex',
                 style: TextStyle(
                   color: Colors.white,
