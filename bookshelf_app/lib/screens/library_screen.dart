@@ -116,7 +116,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
               selected: isSelected,
               onSelected: (_) => setState(() => _selectedGenre = label),
               showCheckmark: false,
-              selectedColor: const Color(0xFF4A3728),
+              selectedColor: Theme.of(context).colorScheme.primary,
               labelStyle: TextStyle(
                 color: isSelected ? Colors.white : Colors.black87,
                 fontWeight:
@@ -125,7 +125,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
               backgroundColor: Colors.white,
               side: BorderSide(
                 color: isSelected
-                    ? const Color(0xFF4A3728)
+                    ? Theme.of(context).colorScheme.primary
                     : Colors.grey.shade300,
               ),
             ),

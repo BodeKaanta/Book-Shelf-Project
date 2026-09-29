@@ -31,7 +31,14 @@ class BookShelfApp extends StatelessWidget {
     return MaterialApp(
       title: 'Bookedex',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF4A3728)),
+        // Sampled from assets/icon/bookedex_icon.png — the same red as the
+        // Android adaptive background and background_color_ios. fidelity keeps
+        // the palette on the seed; the default tonalSpot builds low-chroma
+        // pastels, which turned this red into a brown.
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFEA3442),
+          dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+        ),
         useMaterial3: true,
       ),
       home: const MainScaffold(),
