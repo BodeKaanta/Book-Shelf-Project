@@ -42,14 +42,17 @@ void main() {
     });
 
     test('not even the shelf photo that used to trip the heuristic', () {
-      // Invisible Cities carries five neighbouring spines against three lines
-      // of cover text. The vote inside _hasTransposedBoxes still goes the wrong
-      // way — the platform gate is what makes that harmless.
+      // This fixture carries five neighbouring spines against three lines of
+      // cover text, and the vote inside _hasTransposedBoxes goes the wrong way
+      // on it — the platform gate is what makes that harmless. The photo
+      // re-OCRs without those spines on current iOS, which is part of why #107
+      // closed not planned; the fixture still pins the vote's shape.
       final shelf = linesOf('scaled_1458.heic');
       expect(service.shouldTranspose(shelf, isIOS: false), isFalse);
       expect(service.shouldTranspose(shelf, isIOS: true), isTrue,
-          reason: 'the underlying heuristic is still wrong here (#107); this '
-              'test documents that rather than accepting it');
+          reason: 'the vote is the wrong shape on this fixture; this test '
+              'documents that deliberately. #107 closed not planned — it fires '
+              'on no real photo — so do not invert without the symptom');
     });
   });
 
