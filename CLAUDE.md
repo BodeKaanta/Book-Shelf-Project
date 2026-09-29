@@ -225,6 +225,10 @@ flutter run --release --dart-define-from-file=.env -d <device-id>
 
 **ML Kit ships no arm64 simulator slices** (`GoogleMLKit`, `MLImage`, `MLKitCommon`, `MLKitVision`). The Simulator isn't merely "fussy" as previously assumed — the architecture is absent. iOS recognition can only be tested on physical hardware. The build also warns that the ML Kit plugins' lack of SPM support "will become an error in a future version of Flutter" — a forced migration eventually.
 
+**Never construct a `TextRecognizer` per photo (#120).** A 19-photo import crashed the instant Add was pressed; four photos were fine. `EXC_CRASH`/`SIGABRT` with `NSInvalidArgumentException` — `-[… synchronize]: unrecognized selector` — thrown inside `-[MLKAnalyticsLogger synchronizeUserDefaults]` while *constructing* a recognizer. Unrecognized selector on what should be `NSUserDefaults` is a freed object whose address was reused. `extractTextFromImage` built and closed one per image, so N photos meant N construct/teardown cycles against ML Kit's shared analytics logger. One lazily-created recognizer now lives for the life of the service. It is also faster: constructing one **loads the OCR model**, so the model was being reloaded per photo.
+
+The first theory was memory — `image_picker` on iOS genuinely does decode every selected photo at **full resolution before** applying `maxWidth`/`maxHeight`, so 19 at once is a real spike, and `maxWidth: 2000` does nothing to prevent it. That theory was still wrong: a memory termination reports `EXC_RESOURCE`, not `SIGABRT` with an ObjC exception. **Read the exception type before theorising.**
+
 **`ITSAppUsesNonExemptEncryption = false`** is in `Info.plist`. Without it App Store Connect asks the export-compliance question on *every* build before it can be distributed. `false` is accurate: only standard HTTPS/TLS to Google Books and Firebase, which Apple exempts.
 
 **Which machine can cut a release:**
@@ -249,13 +253,13 @@ The policy describes **current** behaviour on purpose, including two unflatterin
 
 **A handoff document for Richie** covers the App Store Connect work that needs no code: `C:\dev\bookedex-storefront-handoff.md` (plus an `.html` twin). It is a **static copy** — sending it again is the only way to update his. Two items in it are Bode's alone because they are legal acts in his name: accepting the Apple Developer Program License Agreement (at **developer.apple.com/account**, not App Store Connect) and setting EU trader status.
 
-### Beta status — 27 Sep 2026
+### Beta status — 28 Sep 2026
 
-**Nothing has ever been uploaded to App Store Connect.** The TestFlight → Builds list reads "No Builds".
+**Build `1.0.0 (4)` is uploaded and processed in App Store Connect.** TestFlight → Builds shows it Complete. That is the first binary this project has ever sent to Apple, and it ends the Mac-only part of the beta.
 
-**"Built" is not "uploaded", and conflating them wasted a session.** `flutter build ipa` produced build 1's IPA on the Mac in early September, and release builds have run on the iPad — those are builds. Transmitting a binary to Apple is a separate step that has not happened. Build 1 is stale regardless: it predates #83, #104, #105 and #109.
+**"Built" is not "uploaded", and conflating them wasted a session.** A local `flutter build ipa` is a build; transmitting the binary is a separate step. Builds 1 and 3 were both produced locally and never sent — 3 was archived and then found to crash (#120), so it must never be uploaded.
 
-`version:` is **`1.0.0+3`** (bumped in #118). Apple rejects a reused build number outright, so bump the `+N` again after every upload.
+`version:` is **`1.0.0+4`** (bumped in #122). Apple rejects a reused build number outright, so bump the `+N` again after every upload — including after a build that was only ever archived locally.
 
 **Accepted:** the Apple Developer Program License Agreement (27 Sep). **Still empty as of 27 Sep: App Information and App Privacy** — both are gates on external TestFlight, not optional polish.
 
@@ -263,7 +267,7 @@ Remaining gates on the **external** (public-link) TestFlight track:
 
 | Gate | Where | Needs |
 |---|---|---|
-| Upload a build | Mac or Codemagic | **The only hard blocker** — Windows cannot produce one |
+| ~~Upload a build~~ | Mac | ✅ **Done 28 Sep — `1.0.0 (4)`.** Every remaining gate is App Store Connect web work and can be finished from Windows |
 | App Information URLs + category | App Store Connect | Nothing; both URLs are live above |
 | App Privacy questionnaire | App Store Connect | Nothing; answers are recorded above |
 | Age rating questionnaire | App Store Connect | Nothing |
@@ -284,7 +288,11 @@ Internal testing needs neither the review nor the policy — only a build and te
 ```
 security find-identity -v -p codesigning
 ```
-At least one **"Apple Distribution"** line must appear. Zero means `flutter build ipa` will archive successfully and *then* fail at export with `No Accounts` / `No signing certificate "iOS Distribution" found`. Device builds keep working the whole time — an `Apple Development` certificate is already in the keychain — so nothing warns you until the last step, which is the most demoralising way to lose an hour.
+**⚠️ Do not use that command to decide whether signing will work — it is misleading.** It printed `Apple Distribution: 0` before the sign-in *and after it*, including immediately after an export that succeeded. The certificate Xcode uses is **Cloud Managed Apple Distribution**, fetched on demand at export time and never written to the local keychain, so `find-identity` cannot see it. Verified 28 Sep: zero local distribution identities, `DistributionSummary.plist` showing `Cloud Managed Apple Distribution` on all 14 components, upload successful.
+
+**What actually matters is whether an Apple ID is signed in** (Xcode → Settings → Accounts). Before the sign-in, `flutter build ipa` archives and then fails at export with `No Accounts` / `No signing certificate "iOS Distribution" found`. After it, the same command exports cleanly with no other change. Device builds keep working throughout — an `Apple Development` certificate really is in the keychain — so nothing warns you until the last step.
+
+**Xcode Settings is in the macOS menu bar, not the Welcome window** (**⌘,**, or Xcode → Settings from the bar beside the  logo). The Welcome window offers only "create / clone / open", which reads like there is no Settings at all.
 
 **Then, in order:**
 ```
@@ -308,12 +316,23 @@ Distribute App → App Store Connect → Upload. Then watch **App Store Connect 
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `No signing certificate "iOS Distribution" found` at export | Xcode not signed in | Settings → Accounts → + |
+| `No signing certificate "iOS Distribution" found` at export | Xcode not signed in | Settings → Accounts → **+** (⌘, — the menu bar, not the Welcome window) |
+| `Upload Symbols Failed — no dSYM` for `FirebaseFirestoreInternal`, `absl`, `grpc`, `grpcpp`, `openssl_grpc` | Firebase ships these prebuilt through SPM with symbols stripped | **Ignore.** Benign and expected; does not block processing, TestFlight or review |
 | Recognition degrades to Open Library in the shipped build | dart-define missing — Archive button used | Rebuild with `flutter build ipa --dart-define-from-file=.env` |
 | `pod install` rejects platform 15.5 | ML Kit demanding higher | Raise it in `ios/Podfile` **and** `IPHONEOS_DEPLOYMENT_TARGET` together — they must match |
 | "can only be launched from Flutter tooling" on the device | Normal for debug: the JIT needs a debugger attached | `flutter run --release --dart-define-from-file=.env -d <id>` |
 | Build number rejected as already used | `version:` not bumped | Bump the `+N` in `pubspec.yaml` |
 | Simulator build fails to link ML Kit | No arm64 simulator slices exist | Physical device only — this is not fixable |
+
+**Distribute App is not the beta review, and three similarly-named buttons do three different things:**
+
+| Button | Where | What it does |
+|---|---|---|
+| **Distribute App** | Xcode Organizer | Uploads the binary. No review, nothing public, no clock started |
+| **Submit for Beta App Review** | App Store Connect → TestFlight → External group | 24–48h review; unlocks the public tester link |
+| ⚠️ **Submit for Review** | App Store Connect → **Distribution** tab | A real **App Store launch** submission. Not this. |
+
+Internal testing needs none of them beyond the upload — it goes live minutes after processing.
 
 **Submitting (the meeting itself):** TestFlight → create an **External** group → add the build → **Submit for Beta App Review**. 24–48h on the first build of a version. Do **not** use "Submit for Review" on the Distribution tab — that is a real App Store submission. The public link is created once and never changes, so later builds need no new link and usually no new review.
 
@@ -484,7 +503,7 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 **Step 6 issues — all merged:** #41 confidence score · #42 routing · #43 swipe card · #44 manual search · #45 Import wiring + summary popup (+ deleted `poc_screen.dart`) · #68 cascading card stack + picker-return flash.
 
 **Follow-ups filed as issues:**
-- **#93 (iOS: crash on the first "Use Photo" after capture)** — killed the app once on the first camera capture after a fresh install, never reproduced. Ruled out: the Flutter tooling detaching, and a missing usage-description string (both are present, and that class kills the process *every* time). Leading theory is memory pressure — "Use Photo" is peak memory (full-res capture + JPEG encode + ML Kit's first model load) on a 3GB iPad. **Do not "fix" it by downscaling capture**: that reverses the deliberate full-resolution decision that protects thin/vertical cover text. If it was a memory kill there is no `Runner` crash report to find — iOS records those as system-wide `JetsamEvent-*.ips`. Blocked on crash visibility: `devicectl sysdiagnose` fails and nothing syncs to the Mac, which is why TestFlight (dSYMs upload, so reports arrive symbolicated) and Firebase Crashlytics matter.
+- **#93 (iOS: crash on the first "Use Photo" after capture)** — **read #120 first: it may share a root.** #120 was the same `MLKAnalyticsLogger`/`NSUserDefaults` path, crashing while *constructing* a recognizer; #93 was a single construction against uninitialised first-run state. Plausible, unproven. Note TestFlight now has the dSYMs, so a recurrence arrives symbolicated — which is what #93 was always blocked on. — killed the app once on the first camera capture after a fresh install, never reproduced. Ruled out: the Flutter tooling detaching, and a missing usage-description string (both are present, and that class kills the process *every* time). Leading theory is memory pressure — "Use Photo" is peak memory (full-res capture + JPEG encode + ML Kit's first model load) on a 3GB iPad. **Do not "fix" it by downscaling capture**: that reverses the deliberate full-resolution decision that protects thin/vertical cover text. If it was a memory kill there is no `Runner` crash report to find — iOS records those as system-wide `JetsamEvent-*.ips`. Blocked on crash visibility: `devicectl sysdiagnose` fails and nothing syncs to the Mac, which is why TestFlight (dSYMs upload, so reports arrive symbolicated) and Firebase Crashlytics matter.
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
 - ✅ **#87 (delete `linux/`, `macos/`, `windows/`) — done.** Seven generated plugin-registrant files used to show as modified after **every** `flutter pub get` (including the implicit ones inside `dart run flutter_launcher_icons` and `flutterfire configure`) with **zero content change**: Flutter writes LF, Windows Git checks out CRLF. It made a clean `main` read as dirty (`main*` in VS Code) and cost real diagnosis time. **Deleting the folders was necessary but not sufficient** — `flutter pub get` still regenerates the registrant stubs into those paths (an empty `windows/`, three files under `linux/flutter/`, `macos/Flutter/`), so they came straight back as *untracked* noise instead of modified noise. The fix is both halves: the tracked scaffolding is deleted **and** `/linux/`, `/macos/`, `/windows/` are gitignored. Desktop is not a build target — Android + iOS only — so if it were ever wanted, `flutter create --platforms=windows .` regenerates it.
 - **#100 (search your own library)** — requested by Richie; there is currently no way to find a book you already own. One screen, opened from the bottom-nav Search tab *and* a search icon in the Library AppBar. Filters `booksStreamProvider` **in memory** rather than querying Firestore: Firestore has no substring search (server-side would mean a third-party index like Algolia), the free tier caps at 100 books, and in-memory also works offline at no read cost. `_GridTile` is private to `library_screen.dart` and should be extracted so search results match the grid instead of drifting from it.
@@ -548,7 +567,7 @@ bookshelf_app/lib/
 ├── models/book.dart                 — Book model, fromGoogleBooksJson + googleCoverUrl (600px, no page-curl), fromOpenLibraryJson, fromFirestore, toFirestore
 ├── widgets/book_grid_tile.dart       — BookGridTile: one book in a 3-column grid (cover, title, author). Shared so library search (#100) renders identically; `gridAspectRatio` lives here beside the layout it describes
 ├── models/pending_book.dart
-├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult (per-line text + bounding box + imageHeight + isScreenshot). Normalizes iOS's transposed boxes here (#94) so the query builder sees Android geometry
+├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult. Holds ONE lazily-created TextRecognizer for the service's life — one per photo crashed iOS (#120) (per-line text + bounding box + imageHeight + isScreenshot). Normalizes iOS's transposed boxes here (#94) so the query builder sees Android geometry
 ├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText. _fetchBooks = Google Books, falling back to Open Library only on timeout/429/5xx
 ├── services/book_repository.dart    — BookRepository: addBook (returns doc id, null if dup), addBooks (one WriteBatch for import), deleteBook, watchBooks. Dedup = same googleBooksId OR same title+author (catches different Google Books editions)
 ├── providers/recognition_provider.dart     — bookRepositoryProvider (+ RecognitionNotifier, now unused — kept in case the camera flow ever wants a single-photo notifier)
