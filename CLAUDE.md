@@ -153,9 +153,39 @@ Then check the Build Order section to see the current step. The open issues tell
 - The Firebase keys in `firebase_options.dart` / `google-services.json` are identifiers, not secrets — safe to commit. Data access is enforced by Firestore security rules, not by hiding these keys.
 - **⚠️ The shipped iOS build carries the Books API key, extractable.** Verified 28 Sep by unzipping the uploaded IPA: `.env` is **not** bundled, no `.p8`, no keystore, no private keys — but the key itself sits as a plain string in `Frameworks/App.framework/App`, findable with `strings`. That is what dart-define does: it keeps the key out of a readable file, then compiles it into the binary. Unavoidable for any client-side key; the only true fix is proxying through a Cloud Function.
 - **What a stolen key can do is the thing that matters, and here it is bounded:** Books API is free with no billing attached, so the worst case is quota exhaustion, which degrades recognition to the Open Library fallback. No money and no user data at risk. That is why this is an accepted trade rather than an exposure.
-- **Before testers get the build** (not "before public launch" — external TestFlight is distribution), restrict the Books API key in Google Cloud Console: **API restriction** → Books API only; **Application restriction** → **iOS apps → bundle ID `com.bookedex.app`**; and a **daily quota cap**. iOS bundle-ID restrictions are spoofable by a determined attacker, so the quota cap is the real backstop. **This is console-side and independent of any build** — it applies to every client using the key the moment it is saved, so it needs no rebuild and can be done from Windows.
-  - ⚠️ **A typo in the bundle ID breaks recognition silently**: every lookup is rejected and falls through to the Open Library fallback, which still half-works, so nothing announces the mistake. Same failure shape as a missing dart-define. Import a photo immediately after applying and confirm books still resolve.
-- **Before public launch:** enable Firebase App Check, and add the **Android** package name + SHA-1 restrictions too. The Android half was the only one recorded here until 28 Sep, written when Android was shipping first — iOS shipped first in the end, so following this list literally would have left the shipping platform unrestricted.
+- **Before testers get the build** (not "before public launch" — external TestFlight is distribution), set the Books key's **API restriction → Books API only** in Google Cloud Console. Done 5 Oct. **This is console-side and independent of any build** — it applies to every client the moment it is saved, so it needs no rebuild and can be done from Windows. It is the half that genuinely matters: a stolen key can now call Books and nothing else in the project.
+  - ⚠️ **A wrong restriction breaks recognition silently**: every lookup is rejected and falls through to the Open Library fallback, which still half-works, so nothing announces the mistake. Same failure shape as a missing dart-define. Import a photo immediately after applying and confirm books still resolve.
+
+### Books API quota — corrected 5 Oct, and the earlier advice here was wrong
+
+**Application restrictions are a radio button, not a checklist.** Google Cloud allows exactly **one** per key — None / Websites / IP addresses / Android apps / iOS apps. This section previously said to set iOS now and add Android "too"; that is not possible on one key, and either choice breaks a platform:
+
+| Choice | Consequence |
+|---|---|
+| iOS apps | Android dev builds on the Pixel silently degrade to Open Library |
+| Android apps | **The shipped TestFlight build breaks for every tester** |
+| **None** *(current)* | Nothing breaks; protection is the API restriction + the default quota |
+
+Left on **None** deliberately. The proper fix is **two keys — one iOS-restricted, one Android-restricted, chosen at runtime via `Platform.isIOS`** with both passed through dart-define. Post-beta work.
+
+**"The quota cap is the real backstop" was wrong and is deleted.** Books API has **no billing attached**, so there is no spend to cap. A lower daily limit defends nothing — it only lowers the ceiling before *our own app* degrades. The threat model is unchanged and still bounded (a stolen key can waste quota; no money and no user data at risk), but the cap was never the control that bounded it.
+
+**The real risk is running out, not being abused.** Measured 5 Oct: default **1,000 queries/day**, 100/minute/user, and raising it requires an application.
+
+| Spend | Requests |
+|---|---|
+| One photo | 1, sometimes 2 — `searchBooks` retries with relaxation when nothing matches |
+| One 20-photo import | 20–40 |
+| Manual search | several per title; the field is debounced at 350ms, not per-submit |
+| 25 testers opening the link the same day | 500–1,000 ⚠️ |
+
+**Exhaustion returns 429, which `_fetchBooks` treats as transport failure and falls through to Open Library.** Recognition drops **16/20 → 13/20 with nothing surfaced**. During a beta that is worse than an outage: testers report poor recognition, the reports look like a query-builder regression, and the feedback the beta exists to collect is measuring the wrong engine. **If a quota alert fires, believe it over the tester reports.**
+
+So: **an alert, not a cap.** ⋮ on the *Queries per day* row → alert at ~700. Watch the **Metrics** tab on days one and two to learn the real consumption rate before deciding whether the increase application is worth filing. Staggering the tester link — five people first, then widen — spreads the one genuinely risky day and gives cleaner early feedback anyway.
+
+- **Leave the three Firebase auto-created keys alone until after the beta** (`iOS key`, `Android key`, `Browser key`, all at "25 APIs"). Misconfiguring the **iOS** one means Firebase cannot initialise and **the app does not start at all** — a far worse failure than the Books key's degraded-but-working mode, and the worst possible thing to discover from a tester. Those keys are identifiers anyway; **Firestore security rules are what protect the data**, not key secrecy.
+- **An orphaned OAuth client still exists**: `iOS client for com.example.bookshelfApp` in Credentials, left from the bundle-ID change — deleting a Firebase *app* does not delete its underlying OAuth *client*. Safe to delete, since the app uses anonymous auth and **no OAuth client on that page is used by Bookedex at all**, but there is no upside to doing it before the beta ships.
+- **Before public launch:** enable Firebase App Check, restrict the Firebase keys, and split the Books key in two as above. The Android half was the only one recorded here until 28 Sep, written when Android was shipping first — iOS shipped first in the end, so following this list literally would have left the shipping platform unrestricted.
 - Never commit secrets to git. If a real secret is ever needed (paid API, etc.), it belongs behind a Cloud Function — never in the app.
 
 ## Release Builds (Android)
