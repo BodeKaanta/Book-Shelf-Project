@@ -340,7 +340,41 @@ The policy describes **current** behaviour on purpose, including two unflatterin
 
 `version:` is **`1.0.0+5`** (bumped in #128). Apple rejects a reused build number outright, so bump the `+N` again after every upload — including after a build that was only ever archived locally, as build 3 was.
 
-**Accepted:** the Apple Developer Program License Agreement (27 Sep). **Still empty as of 27 Sep: App Information and App Privacy** — both are gates on external TestFlight, not optional polish.
+**Submission prep finished 5–6 Oct.** Everything below is done; only the submission itself remains.
+
+| Item | State |
+|---|---|
+| Apple Developer Program License Agreement | Accepted 27 Sep (**developer.apple.com/account**, not App Store Connect) |
+| Privacy Policy URL | Set. **User Privacy Choices URL left blank** — that field is for "Do Not Sell My Info" opt-out pages required of apps that sell or share data for advertising. Bookedex does neither, so there is no choices page to link. Pointing it at the policy would imply a control that does not exist |
+| App Privacy | **Published.** Exactly two data types, both *Linked to the user's identity*, both *App Functionality*, neither tracking |
+| Age Rating | **4+**, Age Categories = **Not Applicable** |
+| Beta App Description + Feedback Email | Set |
+| Beta App Review Information | Set |
+| Build 1.0.0 (5) | Installed from TestFlight on the iPad and exercised |
+| **Remaining** | External group → add build → Submit for Beta App Review |
+
+**The "linked to the user's identity" answer is Yes, and it is a judgement call worth not re-litigating.** The anonymous Firebase UID has no email or name attached, which makes "not linked" superficially tempting. Apple's own wording on that screen is *linked via their account, **device**, or details* — the UID is a persistent per-install identity that every book in a library hangs off. Apple's exemption requires de-identification applied **before collection that breaks the linkage**; never collecting a name is a different thing. It also matches the privacy policy, which says libraries are tied to an installation, and Apple compares the two. Over-declaring costs a slightly more conservative label; under-declaring risks a mismatch.
+
+⚠️ **Age Rating: never select "Made for Kids".** It is not a description, it is an opt-in to Apple's Kids Category, which forbids third-party analytics and requires parental gates on external links. Bookedex would fail it — OCR text goes to Google Books, and step 7 adds Amazon links. "Not Applicable" is both correct and consistent with the privacy policy's "not directed at children under 13".
+
+**Where the fields actually live** — this cost real time to find:
+
+| Field | Location |
+|---|---|
+| Age Rating | Distribution → **App Information** (a row with an Edit link, below the category fields — not a section heading) |
+| Primary / Secondary Category | Distribution → **App Information** |
+| **Support URL**, Marketing URL | Distribution → **the version page** ("1.0 Prepare for Submission") → General Information. **Not** App Information |
+| Beta App Description, Feedback Email, Beta App Review Information | TestFlight → **Test Information** (app-level) |
+| **What to Test** | TestFlight → **Builds** → the specific build. It is **per-build**, not per-app, so each build can say what changed |
+
+**Screenshots and the Support URL are store-listing requirements, not TestFlight gates.** Neither blocks a beta submission. This matters because nobody on the team owns an iPhone, and ML Kit ships no simulator slices — so App Store screenshots remain genuinely unsolved and are waiting at launch, not now.
+
+**Beta App Review Information — two things that decide whether a review stalls:**
+- **Sign-in required: No.** Leave it Yes and Apple expects demo credentials, then rejects for their absence. Anonymous auth means there is genuinely no login.
+- **Use the Notes field.** The reviewer is at a desk and may have no physical books. Tell them the Import tab accepts screenshots, so any cover image saved from the web works; that camera and photo permissions are both needed; and that no account is required. A reviewer who cannot exercise the app is a self-inflicted rejection.
+- Contact name and phone are Bode's; the email is `bookedexapp@gmail.com` so both people see a review query and Apple's correspondence stays out of personal mail. **None of it is public** — unlike EU trader status, which is.
+
+**The end-user License Agreement under App Information needs nothing** — Apple's standard EULA applies by default. The **Paid Applications Agreement** under Business is a third, separate thing, needed when Premium ships and irrelevant to a free beta.
 
 Remaining gates on the **external** (public-link) TestFlight track:
 
@@ -602,6 +636,9 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 
 **Follow-ups filed as issues:**
 - **#93 (iOS: crash on the first "Use Photo" after capture)** — **read #120 first: it may share a root.** #120 was the same `MLKAnalyticsLogger`/`NSUserDefaults` path, crashing while *constructing* a recognizer; #93 was a single construction against uninitialised first-run state. Plausible, unproven. Note TestFlight now has the dSYMs, so a recurrence arrives symbolicated — which is what #93 was always blocked on. — killed the app once on the first camera capture after a fresh install, never reproduced. Ruled out: the Flutter tooling detaching, and a missing usage-description string (both are present, and that class kills the process *every* time). Leading theory is memory pressure — "Use Photo" is peak memory (full-res capture + JPEG encode + ML Kit's first model load) on a 3GB iPad. **Do not "fix" it by downscaling capture**: that reverses the deliberate full-resolution decision that protects thin/vertical cover text. If it was a memory kill there is no `Runner` crash report to find — iOS records those as system-wide `JetsamEvent-*.ips`. Blocked on crash visibility: `devicectl sysdiagnose` fails and nothing syncs to the Mac, which is why TestFlight (dSYMs upload, so reports arrive symbolicated) and Firebase Crashlytics matter.
+- **#133 (iOS: crash on the first large import after a fresh install)** — build 5 from TestFlight, first launch, 19 photos, crashed as the picker returned. The identical import then ran twice with no crash. `EXC_CRASH (SIGABRT)`, and the backtrace is `__exceptionPreprocess` → `objc_exception_throw` → `_copyDescription` → `___forwarding___` → `_CF_forwarding_prep_0`: the **"unrecognized selector sent to instance"** path, which in practice means a **freed object whose address was reused**. Same *class* as #120, different place entirely — **there are zero ML Kit symbols in the file**, so it is neither #120 nor #93's ML Kit theory. It ran on the main queue via `_dispatch_call_block_and_release` called from Flutter, which is the shape of a plugin delivering a result back to Dart; `image_picker`'s Objective-C is statically linked into `Runner`, which is why those frames are attributed there. **Do not attempt a fix until the frames are symbolicated** — App Store Connect → TestFlight → Crashes has the dSYMs and will name them. Two of three theories that night were wrong and the report settled it in minutes.
+  - **This also disproves the memory theory for good.** A memory termination reports `EXC_RESOURCE` and lands in a system-wide `JetsamEvent-*.ips`, not a `Runner-*.ips`. The idea that `image_picker` decoding 19 photos at full resolution exhausts a 3GB iPad has now failed to explain two separate crashes. Stop reaching for it.
+  - **Reading a crash report needs no Mac.** On the device: **Settings → Privacy & Security → Analytics & Improvements → Analytics Data**, then find `Runner-<date>.ips`. The file is JSON; `exception`, `termination`, `asi`, `lastExceptionBacktrace` and `usedImages` are the fields worth reading, and frames map to libraries through `imageIndex`.
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
 - ✅ **#87 (delete `linux/`, `macos/`, `windows/`) — done.** Seven generated plugin-registrant files used to show as modified after **every** `flutter pub get` (including the implicit ones inside `dart run flutter_launcher_icons` and `flutterfire configure`) with **zero content change**: Flutter writes LF, Windows Git checks out CRLF. It made a clean `main` read as dirty (`main*` in VS Code) and cost real diagnosis time. **Deleting the folders was necessary but not sufficient** — `flutter pub get` still regenerates the registrant stubs into those paths (an empty `windows/`, three files under `linux/flutter/`, `macos/Flutter/`), so they came straight back as *untracked* noise instead of modified noise. The fix is both halves: the tracked scaffolding is deleted **and** `/linux/`, `/macos/`, `/windows/` are gitignored. Desktop is not a build target — Android + iOS only — so if it were ever wanted, `flutter create --platforms=windows .` regenerates it.
 - **#100 (search your own library)** — requested by Richie; there is currently no way to find a book you already own. One screen, opened from the bottom-nav Search tab *and* a search icon in the Library AppBar. Filters `booksStreamProvider` **in memory** rather than querying Firestore: Firestore has no substring search (server-side would mean a third-party index like Algolia), the free tier caps at 100 books, and in-memory also works offline at no read cost. `_GridTile` is private to `library_screen.dart` and should be extracted so search results match the grid instead of drifting from it.
