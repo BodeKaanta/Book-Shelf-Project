@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import '../models/book.dart';
+import '../screens/book_detail_sidebar.dart';
 
 // One book anywhere it appears in the user's own library: cover, title, author.
 // A cover on its own is unidentifiable when recognition picked an odd edition,
 // and the user had no way to tell without opening the book.
 //
 // Shared by the Library grid, the Home rows, and library search (#100) so they
-// cannot drift apart.
+// cannot drift apart. That includes where a tap goes: every tile opens the book
+// detail sidebar, so no caller can wire it differently or forget to.
 class BookGridTile extends StatelessWidget {
   final Book book;
 
@@ -36,60 +38,65 @@ class BookGridTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = book.coverUrl?.replaceFirst('http://', 'https://');
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Expanded, not a fixed ratio: the cover gives up space so a long title
-        // or a large accessibility text scale can never overflow the tile.
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: url == null
-                ? _placeholder()
-                : Image.network(
-                    url,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    // Covers are stored at 600px so the detail sidebar has a
-                    // sharp source; decoding every tile at that width would
-                    // hold ~2MB each and thrash the 100MB image cache.
-                    cacheWidth: 400,
-                    errorBuilder: (_, _, _) => _placeholder(),
-                  ),
+    return GestureDetector(
+      // Opaque so the gap between cover and caption opens the book too.
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showBookDetail(context, book),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Expanded, not a fixed ratio: the cover gives up space so a long title
+          // or a large accessibility text scale can never overflow the tile.
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: url == null
+                  ? _placeholder()
+                  : Image.network(
+                      url,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      // Covers are stored at 600px so the detail sidebar has a
+                      // sharp source; decoding every tile at that width would
+                      // hold ~2MB each and thrash the 100MB image cache.
+                      cacheWidth: 400,
+                      errorBuilder: (_, _, _) => _placeholder(),
+                    ),
+            ),
           ),
-        ),
-        const SizedBox(height: _coverGap),
-        SizedBox(
-          height: captionHeight(context) - _coverGap,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Flexible(
-                child: Text(
-                  book.title,
-                  maxLines: 2,
+          const SizedBox(height: _coverGap),
+          SizedBox(
+            height: captionHeight(context) - _coverGap,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Flexible(
+                  child: Text(
+                    book.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: _titleSize,
+                      height: _lineHeight,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  book.author ?? '',
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: _titleSize,
+                  style: TextStyle(
+                    fontSize: _authorSize,
                     height: _lineHeight,
-                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade600,
                   ),
                 ),
-              ),
-              Text(
-                book.author ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: _authorSize,
-                  height: _lineHeight,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

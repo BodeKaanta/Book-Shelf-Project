@@ -84,6 +84,12 @@ void main() {
         'description': 'A story about trees.',
         'categories': ['Fiction / Literary'],
         'pageCount': 502,
+        'publishedDate': '2018-04-03',
+        // Google lists the ISBN-10 first.
+        'industryIdentifiers': [
+          {'type': 'ISBN_10', 'identifier': '039363552X'},
+          {'type': 'ISBN_13', 'identifier': '9780393635522'},
+        ],
         'imageLinks': {'thumbnail': _thumbnail},
       },
     });
@@ -94,7 +100,61 @@ void main() {
     expect(book.description, 'A story about trees.');
     expect(book.genre, 'Fiction / Literary');
     expect(book.pageCount, 502);
+    expect(book.publishedDate, '2018-04-03');
+    expect(book.isbn, '9780393635522');
     expect(book.coverUrl, contains('fife=w600'));
+  });
+
+  group('isbn', () {
+    Book withIdentifiers(List<Map<String, String>> ids) =>
+        Book.fromGoogleBooksJson({
+          'id': 'x',
+          'volumeInfo': {'industryIdentifiers': ids},
+        });
+
+    test('falls back to the ISBN-10 when that is all there is', () {
+      expect(
+          withIdentifiers([
+            {'type': 'ISBN_10', 'identifier': '039363552X'},
+          ]).isbn,
+          '039363552X');
+    });
+
+    test('ignores identifiers that are not ISBNs', () {
+      // Library scans come back as e.g. "UOM:39015..." under type OTHER.
+      expect(
+          withIdentifiers([
+            {'type': 'OTHER', 'identifier': 'UOM:39015012345678'},
+          ]).isbn,
+          isNull);
+    });
+  });
+
+  group('year', () {
+    Book publishedOn(String? date) => Book(
+        id: '', title: 'T', dateAdded: DateTime(2026), publishedDate: date);
+
+    test('takes the leading four digits of every format Google returns', () {
+      for (final date in ['2018-04-03', '2018-04', '2018']) {
+        expect(publishedOn(date).year, '2018', reason: date);
+      }
+    });
+
+    test('is null when there is no date, or it does not start with a year', () {
+      expect(publishedOn(null).year, isNull);
+      expect(publishedOn('unknown').year, isNull);
+    });
+  });
+
+  test('fromOpenLibraryJson takes the year but not an ISBN', () {
+    // search.json's isbn list spans every edition and translation of the work.
+    final book = Book.fromOpenLibraryJson({
+      'title': 'Invisible Cities',
+      'first_publish_year': 1972,
+      'isbn': ['9780156453806', '9788804668237'],
+    });
+    expect(book.year, '1972');
+    expect(book.isbn, isNull);
   });
 
   test('fromGoogleBooksJson survives a volume with almost nothing in it', () {
@@ -105,5 +165,7 @@ void main() {
     expect(book.author, isNull);
     expect(book.coverUrl, isNull);
     expect(book.description, isNull);
+    expect(book.publishedDate, isNull);
+    expect(book.isbn, isNull);
   });
 }
