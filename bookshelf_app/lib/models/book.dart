@@ -9,6 +9,8 @@ class Book {
   final String? description;
   final String? genre;
   final int? pageCount;
+  final String? publishedDate;
+  final String? isbn;
   final DateTime dateAdded;
 
   Book({
@@ -21,7 +23,14 @@ class Book {
     this.description,
     this.genre,
     this.pageCount,
+    this.publishedDate,
+    this.isbn,
   });
+
+  // Google gives "2018-04-03", "2018-04" or "2018" depending on the edition, so
+  // the year is the leading four digits rather than a parsed date.
+  String? get year =>
+      RegExp(r'^\d{4}').firstMatch(publishedDate ?? '')?.group(0);
 
   // `googleBooksId` holds an Open Library work key ("/works/OL21745884W") while
   // Open Library is the source. Kept under the old name so existing Firestore
@@ -42,6 +51,9 @@ class Book {
       description: null,
       genre: _firstSubject(json['subject'] as List<dynamic>?),
       pageCount: json['number_of_pages_median'] as int?,
+      publishedDate: (json['first_publish_year'] as int?)?.toString(),
+      // No isbn: search.json lists every edition's ISBN for the work, including
+      // translations, so any one of them may be a different book to buy.
       dateAdded: DateTime.now(),
     );
   }
@@ -72,8 +84,21 @@ class Book {
       description: volumeInfo['description'] as String?,
       genre: categories?.isNotEmpty == true ? categories!.first as String : null,
       pageCount: volumeInfo['pageCount'] as int?,
+      publishedDate: volumeInfo['publishedDate'] as String?,
+      isbn: _isbn(volumeInfo['industryIdentifiers'] as List<dynamic>?),
       dateAdded: DateTime.now(),
     );
+  }
+
+  // Stored now so buy links (#135) need no migration. ISBN-13 first: every
+  // book with an ISBN has one, while 979- books have no ISBN-10 at all.
+  static String? _isbn(List<dynamic>? identifiers) {
+    String? ofType(String type) => identifiers
+        ?.whereType<Map<String, dynamic>>()
+        .where((id) => id['type'] == type)
+        .map((id) => id['identifier'] as String?)
+        .firstOrNull;
+    return ofType('ISBN_13') ?? ofType('ISBN_10');
   }
 
   // `imageLinks.thumbnail` is only 128px wide — narrower than a library grid
@@ -122,6 +147,8 @@ class Book {
       description: data['description'] as String?,
       genre: data['genre'] as String?,
       pageCount: data['pageCount'] as int?,
+      publishedDate: data['publishedDate'] as String?,
+      isbn: data['isbn'] as String?,
       dateAdded: (data['dateAdded'] as Timestamp).toDate(),
     );
   }
@@ -135,6 +162,8 @@ class Book {
       'description': description,
       'genre': genre,
       'pageCount': pageCount,
+      'publishedDate': publishedDate,
+      'isbn': isbn,
       'dateAdded': Timestamp.fromDate(dateAdded),
     };
   }

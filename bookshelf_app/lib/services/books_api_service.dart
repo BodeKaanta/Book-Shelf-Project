@@ -184,7 +184,8 @@ class BooksApiService {
   Future<_Lookup> _lookupOpenLibrary(String query, int maxResults) async {
     final uri = Uri.parse(
       '$openLibraryBaseUrl?q=${Uri.encodeComponent(query)}&limit=$maxResults'
-      '&fields=key,title,author_name,cover_i,number_of_pages_median,subject',
+      '&fields=key,title,author_name,cover_i,number_of_pages_median,subject'
+      ',first_publish_year',
     );
 
     final http.Response response;
