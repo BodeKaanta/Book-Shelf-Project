@@ -83,12 +83,17 @@ class Book {
       coverUrl: googleCoverUrl(imageLinks?['thumbnail'] as String?),
       description: volumeInfo['description'] as String?,
       genre: categories?.isNotEmpty == true ? categories!.first as String : null,
-      pageCount: volumeInfo['pageCount'] as int?,
+      pageCount: _knownPageCount(volumeInfo['pageCount'] as int?),
       publishedDate: volumeInfo['publishedDate'] as String?,
       isbn: _isbn(volumeInfo['industryIdentifiers'] as List<dynamic>?),
       dateAdded: DateTime.now(),
     );
   }
+
+  // Google reports 0 for an edition it has no count for, and "0 pages" is never
+  // true. Also applied on read, for books saved before this was caught.
+  static int? _knownPageCount(int? count) =>
+      count != null && count > 0 ? count : null;
 
   // Stored now so buy links (#135) need no migration. ISBN-13 first: every
   // book with an ISBN has one, while 979- books have no ISBN-10 at all.
@@ -122,16 +127,18 @@ class Book {
   // books with no author are not evidence of being the same book, and the
   // library dedup has always required both.
   static String? identityKey(String? title, String? author) {
-    // Editions announce themselves in parentheses: "Project Hail Mary (Movie
-    // Tie-In)" is the same book as "Project Hail Mary". BooksApiService's
-    // _coreTitle already strips these when scoring, so identity has to agree
-    // or the two halves of the app disagree about what one book is.
-    final core = title?.split(':').first.replaceAll(RegExp(r'\(.*?\)'), '');
-    final titleKey = _identityPart(core);
+    final titleKey = _identityPart(title == null ? null : coreTitle(title));
     final authorKey = _identityPart(author);
     if (titleKey.isEmpty || authorKey.isEmpty) return null;
     return '$titleKey|$authorKey';
   }
+
+  // The title before any subtitle, without edition parentheticals: "Project
+  // Hail Mary (Movie Tie-In)" is the same book as "Project Hail Mary". One
+  // definition for identity, recognition scoring and the edition search, so
+  // the three can never disagree about what one book is.
+  static String coreTitle(String title) =>
+      title.split(':').first.replaceAll(RegExp(r'\(.*?\)'), '').trim();
 
   static String _identityPart(String? value) =>
       (value ?? '').toLowerCase().replaceAll(RegExp('[^a-z0-9]'), '');
@@ -146,7 +153,7 @@ class Book {
       coverUrl: data['coverUrl'] as String?,
       description: data['description'] as String?,
       genre: data['genre'] as String?,
-      pageCount: data['pageCount'] as int?,
+      pageCount: _knownPageCount(data['pageCount'] as int?),
       publishedDate: data['publishedDate'] as String?,
       isbn: data['isbn'] as String?,
       dateAdded: (data['dateAdded'] as Timestamp).toDate(),

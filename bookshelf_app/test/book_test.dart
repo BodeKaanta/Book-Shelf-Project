@@ -105,6 +105,23 @@ void main() {
     expect(book.coverUrl, contains('fife=w600'));
   });
 
+  test('coreTitle drops the subtitle and edition parentheticals', () {
+    expect(Book.coreTitle('Project Hail Mary (Movie Tie-In)'),
+        'Project Hail Mary');
+    expect(Book.coreTitle('The Dream Hotel: A Read with Jenna Pick'),
+        'The Dream Hotel');
+  });
+
+  test('a page count of 0 means unknown, not zero pages', () {
+    // Google reports 0 for editions it has no count for; the sidebar would
+    // otherwise show "PAGES 0".
+    final book = Book.fromGoogleBooksJson({
+      'id': 'x',
+      'volumeInfo': {'pageCount': 0},
+    });
+    expect(book.pageCount, isNull);
+  });
+
   group('isbn', () {
     Book withIdentifiers(List<Map<String, String>> ids) =>
         Book.fromGoogleBooksJson({

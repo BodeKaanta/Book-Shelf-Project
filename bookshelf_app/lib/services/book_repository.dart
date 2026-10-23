@@ -36,6 +36,20 @@ class BookRepository {
     await _booksCollection.doc(id).delete();
   }
 
+  // The chosen edition replaces everything that describes an edition rather
+  // than the book, so the year and page count always belong to the cover shown
+  // (#113). Title, author, genre and synopsis stay: the user picked a printing,
+  // not a different book.
+  Future<void> changeEdition(String id, Book edition) async {
+    await _booksCollection.doc(id).update({
+      'googleBooksId': edition.googleBooksId,
+      'coverUrl': edition.coverUrl,
+      'publishedDate': edition.publishedDate,
+      'pageCount': edition.pageCount,
+      'isbn': edition.isbn,
+    });
+  }
+
   // Adds many books in a single WriteBatch (one write → one stream emission →
   // one Home rebuild, instead of one per book). Skips books already in the
   // library and duplicates within the batch; returns what was added (with ids)
