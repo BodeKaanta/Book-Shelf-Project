@@ -131,6 +131,37 @@ class BooksApiService {
     return _dedupeEditions(await _fetchBooks(trimmed, 10) ?? <Book>[]);
   }
 
+  // Every edition of [book] that Google Books has a cover for: the choices for
+  // Change cover (#113). A plain title + author query, because the intitle: and
+  // inauthor: operators returned nothing for five of six books tested, and one
+  // page, because a second added one edition across four. Google only: Open
+  // Library returns works rather than editions, so it cannot answer this.
+  Future<({List<Book> editions, bool failed})> findEditions(Book book) async {
+    final lookup = await _lookupGoogleBooks(
+        '${Book.coreTitle(book.title)} ${book.author ?? ''}'.trim(), 40);
+    return (
+      editions: editionsOf(book, lookup.books ?? <Book>[]),
+      failed: lookup.failed,
+    );
+  }
+
+  // The current edition first, kept even when Google does not return it so the
+  // picker always shows what the user has now, then every other volume of the
+  // same book that has cover art. Pure, so it is testable without the network.
+  @visibleForTesting
+  static List<Book> editionsOf(Book current, List<Book> candidates) {
+    final key = Book.identityKey(current.title, current.author);
+    final seen = {current.googleBooksId};
+    return [
+      current,
+      ...candidates.where((candidate) =>
+          key != null &&
+          candidate.coverUrl != null &&
+          Book.identityKey(candidate.title, candidate.author) == key &&
+          seen.add(candidate.googleBooksId)),
+    ];
+  }
+
   // Google Books primary, Open Library only when Google could not be reached.
   // Null means "nothing matched" either way, so every caller above is unchanged.
   Future<List<Book>?> _fetchBooks(String query, [int maxResults = 5]) async {
@@ -256,16 +287,12 @@ class BooksApiService {
   }
 
   double _candidateMatchScore(Book book, List<String> ocrTokens) {
-    final titleScore = _avgBestSimilarity(_tokens(_coreTitle(book.title)), ocrTokens);
+    final titleScore =
+        _avgBestSimilarity(_tokens(Book.coreTitle(book.title)), ocrTokens);
     final authorTokens = book.author == null ? <String>[] : _tokens(book.author!);
     if (authorTokens.isEmpty) return titleScore;
     return 0.6 * titleScore + 0.4 * _avgBestSimilarity(authorTokens, ocrTokens);
   }
-
-  // Drop subtitle (after ':') and edition parentheticals like "(Movie Tie-In)"
-  // so a longer edition title isn't penalised against a bare one
-  String _coreTitle(String title) =>
-      title.split(':').first.replaceAll(RegExp(r'\(.*?\)'), '');
 
   double _avgBestSimilarity(List<String> targets, List<String> pool) {
     if (targets.isEmpty) return 0.0;

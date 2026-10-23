@@ -5,7 +5,9 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/book.dart';
+import '../providers/books_provider.dart';
 import '../providers/recognition_provider.dart';
+import 'change_cover_screen.dart';
 
 // Tapping a cover anywhere in the library slides this in from the right, with
 // the library still visible and dimmed beside it (Richie's Figma). A route, not
@@ -39,6 +41,16 @@ class BookDetailSidebar extends ConsumerWidget {
     // Three quarters of a phone, as in the Figma. Capped so a tablet gets a
     // sidebar rather than a second screen of mostly empty line length.
     final width = math.min(MediaQuery.sizeOf(context).width * 0.75, 420.0);
+    // Live rather than the snapshot it was opened with, so a changed cover
+    // shows here the moment it is picked. Falls back to the snapshot while a
+    // removal is closing the sidebar and the book is already gone.
+    final current =
+        ref
+            .watch(booksStreamProvider)
+            .valueOrNull
+            ?.where((b) => b.id == book.id)
+            .firstOrNull ??
+        book;
 
     return Align(
       alignment: Alignment.centerRight,
@@ -64,10 +76,21 @@ class BookDetailSidebar extends ConsumerWidget {
                 padding: EdgeInsets.zero,
                 children: [
                   _Cover(
-                    book: book,
+                    book: current,
+                    // Editions are found by title + author; with no author
+                    // there is no telling which results are this book.
+                    onChangeCover:
+                        Book.identityKey(current.title, current.author) == null
+                        ? null
+                        : () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ChangeCoverScreen(book: current),
+                            ),
+                          ),
                     onRemove: () => _confirmRemove(context, ref),
                   ),
-                  _Details(book: book),
+                  _Details(book: current),
                 ],
               ),
             ),
@@ -110,9 +133,14 @@ class BookDetailSidebar extends ConsumerWidget {
 
 class _Cover extends StatelessWidget {
   final Book book;
+  final VoidCallback? onChangeCover;
   final VoidCallback onRemove;
 
-  const _Cover({required this.book, required this.onRemove});
+  const _Cover({
+    required this.book,
+    required this.onChangeCover,
+    required this.onRemove,
+  });
 
   // White on a translucent disc reads over any cover, light or dark.
   static final _overCover = IconButton.styleFrom(
@@ -144,6 +172,17 @@ class _Cover extends StatelessWidget {
               icon: const Icon(Icons.more_horiz),
               style: _overCover,
               itemBuilder: (_) => [
+                if (onChangeCover != null)
+                  PopupMenuItem(
+                    onTap: onChangeCover,
+                    child: const Row(
+                      children: [
+                        Icon(Icons.image_outlined),
+                        SizedBox(width: 12),
+                        Text('Change cover'),
+                      ],
+                    ),
+                  ),
                 PopupMenuItem(
                   onTap: onRemove,
                   child: const Row(
