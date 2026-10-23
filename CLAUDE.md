@@ -89,7 +89,9 @@ Distinct from "NOT in MVP", which is deferred but intended. These may never happ
 
 **Import writes + dedup:** confident auto-adds are collected during the loop and written in **one `WriteBatch` after the loop** (not per book) — avoids N Firestore writes + N Home rebuilds mid-import. Duplicate detection matches on **title + author** (not just `googleBooksId`), so two captures of the same book that resolve to different Google Books editions don't both get added. Duplicates on the swipe/manual-search path show an "already in your library" snackbar; the import summary shows an "N already in your library" line.
 6b. ✅ Cascading card stack on the review screen (#68) — next two queued cards staggered behind the current one, mounted in full so the photo *and* cover thumbnail are decoded before promotion; the deck animates forward during the fly-out so the queue advance is invisible. Also fixed the picker-return flash on Import and Capture.
-7. Book detail sidebar ← **NEXT**
+7. ✅ Book detail sidebar (#112) — tap any cover → a sidebar slides in from the right over the dimmed library; ⋯ → **Remove from library**, the beta testers' top request. Details under "Book Detail Design Notes (Step 7)".
+7a. Change cover (#113) ← **NEXT** — the ⋯ menu's second item
+7b. Buy links (#135) — physical books only; Bookshop.org evaluated alongside Amazon
 8. Basic shelves and manual tags
 9. Mood quiz → ONE recommendation flow
 10. In-app housekeeping prompts
@@ -649,16 +651,26 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 - `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain.
 - Full "delight" import loading animation/game — Phase 2 polish.
 
-## Book Detail Design Notes (Step 7 — Next)
-Richie's Figma prototype: tap a cover anywhere in the library → a sheet slides over it, the library staying visible and dimmed behind.
+## Book Detail Design Notes (Step 7 — Done)
+Richie's Figma prototype: tap a cover anywhere in the library → a panel slides over it from the right, the library staying visible and dimmed beside it.
+
+**What shipped (#112) — `screens/book_detail_sidebar.dart`, settled over four rounds on the Pixel:**
+- **A route, not a Scaffold `endDrawer`.** `showGeneralDialog` with a slide-in from the right. Home and Library sit *inside* the bottom-nav shell, so their drawers could never cover the nav bar the way the design does. 75% of the screen width, capped at 420 so a tablet gets a sidebar rather than a second screen. Closes on X, barrier tap, back, or a swipe right (`Dismissible` with `resizeDuration: null`, so the route simply pops).
+- **Nothing drawn under the status bar.** `SafeArea(bottom: false)` wraps the list; the white runs up behind the icons. The first version ran the cover up under the clock and camera cutout, and it looked wrong.
+- **Cover header: full width at 4:5**, shorter than a cover's own 2:3 so the details — and the buy links — sit higher. The cover is drawn `BoxFit.contain`, so it is never cropped; the slivers either side are a blurred copy of it. **A blur paints past its own bounds — it must sit inside a `ClipRect`**, or it spills over the status bar and the dimmed library (it did). The 400px decode the grid already holds paints instantly (same image-cache key); the stored 600px copy layers over it once downloaded.
+- **Synopsis collapsed to three lines with Read more / Read less**, so the buy links are in view without scrolling past a full blurb. The button shows only when a `TextPainter` measurement says the text actually overflows.
+- Stats hide individually when missing rather than showing a gap. The genre chip is the Figma's grey pill. The YEAR | PAGES divider is explicitly grey — the theme's divider tints pink off the red seed.
+- **`BookGridTile` opens the sidebar itself** — no `onTap` parameter — so the Library grid, the Home rows and library search (#100) cannot wire it differently or forget to.
+
+**Remove from library.** ⋯ → Remove → confirm → delete → the sidebar closes and `booksStreamProvider` updates every grid and row. **The delete is not awaited**: a Firestore write's Future completes only once the *server* confirms it, so offline the sidebar would hang open. The local cache drops the book immediately either way.
+
+**Two new fields: `publishedDate`** (the raw string; `Book.year` takes its leading four digits) **and `isbn`** (ISBN-13 first, ISBN-10 fallback, Google's `OTHER` identifiers ignored). The Open Library fallback contributes `first_publish_year` but **no ISBN** — its `isbn` list spans every edition and translation of the work, so any one of them may be a different book to buy. **Every book added before #112 has neither field** — that is every beta tester's library — so YEAR is absent on those, and buy links need a title+author fallback. A backfill would cost one Books request per old book; deliberately not done.
 
 **Layout, top to bottom:** cover art full-bleed at the top, **X to close top-right and a 3-dot menu opposite it**; genre chip; title; author; a two-column stat row **YEAR | PAGES**; synopsis paragraph; **MOODS** chips; **BUY THIS BOOK** — one row per retailer (Amazon "Paperback · Kindle", Audible "Audiobook") with a chevron each.
 
 **Build for beta: title, author, year, pages, synopsis, genre.** Everything else is layout-only or later:
 - **Moods do not exist yet.** Moods are *user-created tags* a person applies to a book in their own library — that is step 8's "basic manual shelves and tags", and the same vocabulary the mood quiz (step 9) and Richie's filter chips draw on. Until then the detail view shows **genre only**. When moods arrive they sit next to the genre chip and must be **visually distinguished — a different colour** — because one is publisher metadata and the other is the user's own word for the book.
-- **Buy links: build the placement, not the affiliate wiring.** Affiliate links are Phase 3 per the monetization table. The rows should sit and look as the mockup shows so the eventual swap is cosmetic.
-
-**Nothing is tappable yet.** Cover tiles have no `onTap` in `library_screen.dart` or the `home_screen` rows — there is currently no way to open anything from a cover. Step 7 has to wire that, and #100 (library search) needs the same destination for its results.
+- **Buy links → #135.** Plain links first, the affiliate tag once an account is approved — see below.
 
 **What Google Books actually returns**, measured across 12 books from Margot's set via the search endpoint the app already calls. The single-volume endpoint (`/volumes/{id}`) adds only `printedPageCount` and `dimensions` — **there is no reason to make a second request.**
 
@@ -675,19 +687,20 @@ Ignore as plumbing: `contentVersion`, `readingModes`, `panelizationSummary`, `al
 
 **⚠️ Google Books ratings are unusable — 2/12, and the single-volume endpoint does not help.** So MVP scope's "rating" in the sidebar is **the user's own rating** of a book they have read, which is a new Firestore field. The scope line was ambiguous; this settles it.
 
-**Buy links — what is actually possible:**
-- **Amazon: constructible from ISBN-10** (`amazon.com/dp/{ISBN_10}`), present 8/9. The one miss is a movie tie-in whose ISBN-13 starts `979`; those have no ISBN-10 equivalent **by design**, not a data gap. Fall back to a search URL on the ISBN-13.
-- **Google Play: free when present** via `saleInfo.buyLink`, but only 6/12.
-- **Audible: nothing.** Google Books returns no audiobook data at all, so the mockup's "Audible / Audiobook" row could only ever be a search link unless another source is added.
+**Buy links — decided Oct 2026: physical books only (#135).** No Kindle, ebook or audiobook links. The Figma's "Audible / Audiobook" row was the prototype tool filling space, not a requirement.
+- **Bookshop.org: links straight from ISBN-13** (`bookshop.org/a/{affiliateId}/{isbn13}`, per its 2020 author brochure) — no conversion, and the revenue supports independent bookstores. **Evaluated first.** Third-party listings say 10% commission; Bookshop's own support page confirms only a 48-hour last-click referral window. Confirm the rate before choosing.
+- **Amazon: constructible from ISBN-10** (`amazon.com/dp/{ISBN_10}`), present 8/9. We store ISBN-13, so drop the `978` and recompute the mod-11 check digit. The one miss is a movie tie-in whose ISBN-13 starts `979`; those have no ISBN-10 equivalent **by design**, not a data gap. Fall back to a search URL.
+- **Google Play: out.** `saleInfo.buyLink` (6/12) is the Play Books *ebook*.
+- **Audible: out**, and Google Books returns no audiobook data anyway.
 
-The Figma's clean Amazon-and-Audible pair is therefore aspirational, and "Paperback · Kindle" as distinct formats is not something Google tells us either.
+"Paperback · Kindle" as distinct formats is not something Google tells us either.
 
-**Affiliate links are deliberately deferred past beta.** The *link* is trivial; the *programme* is not. Amazon Associates needs an application, a disclosure notice, and — verify current terms — historically a few qualifying sales within ~180 days of approval or the account is closed. A 20-tester beta is unlikely to clear that bar, so applying early risks burning the application. Build the row, point it at a plain untagged link, and swap in a tagged URL once there is real traffic. Link to the **physical** book's page: linking out to buy physical goods is standard, while external purchase flows for *digital* content stray into Apple's review rules.
+**Affiliate tagging waits for real traffic.** The *link* is trivial; the *programme* is not. Amazon Associates needs an application, a disclosure notice, and — verify current terms — historically a few qualifying sales within ~180 days of approval or the account is closed. A 20-tester beta is unlikely to clear that bar, so applying early risks burning the application. Build the row, point it at a plain untagged link, and swap in a tagged URL once there is real traffic. Link to the **physical** book's page: linking out to buy physical goods is standard, while external purchase flows for *digital* content stray into Apple's review rules.
 
-**Store ISBN alongside `publishedDate`.** The detail view reads Firestore, not the API, so anything unstored means a fresh request per open. `publisher` (12/12) and `previewLink` (12/12, "Read a sample") are cheap adds worth considering in the same pass.
+**ISBN and `publishedDate` are stored (#112).** The detail view reads Firestore, not the API, so anything unstored means a fresh request per open. `publisher` (12/12) and `previewLink` (12/12, "Read a sample") were left out — nothing displays them yet.
 
 **Three gaps between the mockup and the data we actually store:**
-- **`publishedDate` is not on `Book` at all.** Google Books returns `volumeInfo.publishedDate` but `fromGoogleBooksJson` drops it, so "YEAR" needs a new field and a Firestore mapping. The format varies — `2018-04-03`, `2018-04`, `2018` — so take the leading four digits rather than parsing a date.
+- **`publishedDate` was not on `Book` at all** — `fromGoogleBooksJson` dropped it. Added in #112. The format varies — `2018-04-03`, `2018-04`, `2018` — so `year` takes the leading four digits rather than parsing a date.
 - **Google's `categories` are far coarser than the mockup.** The Overstory returns `['Fiction']`, not the "Literary Fiction" the Figma shows. Others give `['Young Adult Fiction']`, `['Electronic books']`, or nothing. The genre chip will often read a bland "Fiction" or be absent — design for both.
 - **Year and pages describe the matched *edition*, not the work.** Project Hail Mary's movie tie-in reports 2025 where the original is 2021; The Overstory returns 420 pages where the mockup shows 512. A 2018 novel can legitimately display a 2025 year. Same edition ambiguity as #83 and change-cover.
 
@@ -699,8 +712,8 @@ bookshelf_app/lib/
 ├── main.dart                        — Firebase init, dotenv, anonymous auth, ProviderScope → MainScaffold
 ├── core/constants.dart              — googleBooksBaseUrl, openLibraryBaseUrl/UserAgent, bookLookupTimeout, autoAddConfidenceThreshold (0.75)
 ├── core/recognition_log.dart        — debug-only [REC] dump: OCR lines + boxes, query, top match, and why a lookup missed. Source of test/fixtures
-├── models/book.dart                 — Book model, fromGoogleBooksJson + googleCoverUrl (600px, no page-curl), fromOpenLibraryJson, fromFirestore, toFirestore
-├── widgets/book_grid_tile.dart       — BookGridTile: one book in a 3-column grid (cover, title, author). Shared so library search (#100) renders identically; `gridAspectRatio` lives here beside the layout it describes
+├── models/book.dart                 — Book model, fromGoogleBooksJson + googleCoverUrl (600px, no page-curl), fromOpenLibraryJson, fromFirestore, toFirestore. publishedDate + `year` (leading four digits), isbn (ISBN-13 first)
+├── widgets/book_grid_tile.dart       — BookGridTile: one book in a 3-column grid (cover, title, author). Shared so library search (#100) renders identically; `gridAspectRatio` lives here beside the layout it describes. Tapping any tile opens the detail sidebar
 ├── models/pending_book.dart
 ├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult. Holds ONE lazily-created TextRecognizer for the service's life — one per photo crashed iOS (#120) (per-line text + bounding box + imageHeight + isScreenshot). Normalizes iOS's transposed boxes here (#94) so the query builder sees Android geometry
 ├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText. _fetchBooks = Google Books, falling back to Open Library only on timeout/429/5xx
@@ -715,6 +728,7 @@ bookshelf_app/lib/
 ├── screens/import_screen.dart       — Import tab: Choose Photos → routing (progress) → summary popup → review queue
 ├── screens/approval_screen.dart     — Tinder swipe review card (keyed _ReviewCard: drag/animations, see-other-matches, no-OCR/complete states)
 ├── screens/manual_search_screen.dart — debounced live Google Books search, returns the picked Book
+├── screens/book_detail_sidebar.dart — Step 7: showBookDetail → right-hand sidebar route. 4:5 cover header, genre/title/author, YEAR | PAGES, 3-line synopsis with Read more; ⋯ → Remove from library
 └── screens/placeholder_screen.dart  — Reusable placeholder for the Search and Discover tabs (Home/Capture/Import are real)
 ```
 
