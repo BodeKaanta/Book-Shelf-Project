@@ -90,8 +90,8 @@ Distinct from "NOT in MVP", which is deferred but intended. These may never happ
 **Import writes + dedup:** confident auto-adds are collected during the loop and written in **one `WriteBatch` after the loop** (not per book) — avoids N Firestore writes + N Home rebuilds mid-import. Duplicate detection matches on **title + author** (not just `googleBooksId`), so two captures of the same book that resolve to different Google Books editions don't both get added. Duplicates on the swipe/manual-search path show an "already in your library" snackbar; the import summary shows an "N already in your library" line.
 6b. ✅ Cascading card stack on the review screen (#68) — next two queued cards staggered behind the current one, mounted in full so the photo *and* cover thumbnail are decoded before promotion; the deck animates forward during the fly-out so the queue advance is invisible. Also fixed the picker-return flash on Import and Capture.
 7. ✅ Book detail sidebar (#112) — tap any cover → a sidebar slides in from the right over the dimmed library; ⋯ → **Remove from library**, the beta testers' top request. Details under "Book Detail Design Notes (Step 7)".
-7a. Change cover (#113) ← **NEXT** — the ⋯ menu's second item
-7b. Buy links (#135) — physical books only; Bookshop.org evaluated alongside Amazon
+7a. ✅ Change cover (#113) — ⋯ → Change cover → pick the edition matching your copy; its year, pages and ISBN come with it
+7b. Buy links (#135) ← **NEXT** — physical books only; Bookshop.org evaluated alongside Amazon
 8. Basic shelves and manual tags
 9. Mood quiz → ONE recommendation flow
 10. In-app housekeeping prompts
@@ -647,8 +647,7 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 - **#101 (wire up the Library sort control)** — see the warning under Dashboard Design Notes. Small, and already specified by MVP scope.
 
 **Ideas not yet created:**
-- **Change cover** — specified in full under "Book Detail Design Notes (Step 7)" below; it is part of step 7, not a loose idea.
-- `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain.
+- `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain. **Test it first:** in Oct 2026 `intitle:`/`inauthor:` returned **nothing** for five of six of Margot's books (`inauthor:calvino`, `intitle:overstory`), while working for Project Hail Mary — see Change cover under Step 7.
 - Full "delight" import loading animation/game — Phase 2 polish.
 
 ## Book Detail Design Notes (Step 7 — Done)
@@ -704,7 +703,17 @@ Ignore as plumbing: `contentVersion`, `readingModes`, `panelizationSummary`, `al
 - **Google's `categories` are far coarser than the mockup.** The Overstory returns `['Fiction']`, not the "Literary Fiction" the Figma shows. Others give `['Young Adult Fiction']`, `['Electronic books']`, or nothing. The genre chip will often read a bland "Fiction" or be absent — design for both.
 - **Year and pages describe the matched *edition*, not the work.** Project Hail Mary's movie tie-in reports 2025 where the original is 2021; The Overstory returns 420 pages where the mockup shows 512. A 2018 novel can legitimately display a 2025 year. Same edition ambiguity as #83 and change-cover.
 
-**Change cover (Bode's design).** The 3-dot menu on the cover — opposite the X — opens options including **Change cover**, which shows the other editions of that book so the user can pick the one matching their physical copy. **Deliberately not part of import**: whatever cover recognition picks is fine at add time, and we advertise that it can be changed afterwards. That is why import can dedupe duplicate editions freely (#83) — editions are re-queried by title+author on demand, never carried through the review queue or stored. `coverUrl` is a single Firestore field, so applying a choice is one overwrite. True custom-photo covers are different: they need Cloud Storage = Phase 2.
+**Change cover (Bode's design).** The 3-dot menu on the cover — opposite the X — opens options including **Change cover**, which shows the other editions of that book so the user can pick the one matching their physical copy. **Deliberately not part of import**: whatever cover recognition picks is fine at add time, and we advertise that it can be changed afterwards. That is why import can dedupe duplicate editions freely (#83) — editions are re-queried by title+author on demand, never carried through the review queue or stored. True custom-photo covers are different: they need Cloud Storage = Phase 2.
+
+**What shipped (#113) — `screens/change_cover_screen.dart`:**
+- **Picking an edition overwrites five fields, not just the cover:** `coverUrl`, `googleBooksId`, `publishedDate`, `pageCount`, `isbn` (`BookRepository.changeEdition`). The year and pages belong to the printing shown, so a movie tie-in cover never sits over the original's 2021. Title, author, genre and synopsis stay — the user picked a printing, not a different book.
+- **One plain `"{coreTitle} {author}"` query, Google only** (`BooksApiService.findEditions`). Measured on six of Margot's books: the `intitle:`/`inauthor:` operators returned **zero results for five of them** while working for Project Hail Mary, and a second results page added one edition across four books. Open Library is no fallback here — it returns works, not editions — so a failed lookup says "Couldn't reach Google Books" with a retry instead.
+- **The filter is `editionsOf`, pure and tested against Google's real Project Hail Mary results** (`test/editions_test.dart`): same `Book.identityKey` (which drops the box set, the Indonesian translation and the `Weir Andy` record), has a cover, current edition first — kept even when Google does not return it.
+- **Expect 2–4 choices per book.** That is Google's real yield, not a bug; some books have only the current one and show "no other covers".
+- Hidden for books with no author — identity needs both halves.
+- The sidebar now watches `booksStreamProvider` rather than its opening snapshot, so a changed cover shows the moment it is picked.
+- **`Book.coreTitle` is now the single title-normalising rule** for identity, recognition scoring and the edition search; it used to exist twice with a comment saying they must agree.
+- **Google reports `pageCount: 0` for editions with no count** — 2 of the 6 Project Hail Mary editions with covers, and most of the coverless records. `Book` treats 0 as unknown on both API and Firestore reads, so "PAGES 0" never displays.
 
 ## Key Files
 ```
@@ -712,12 +721,12 @@ bookshelf_app/lib/
 ├── main.dart                        — Firebase init, dotenv, anonymous auth, ProviderScope → MainScaffold
 ├── core/constants.dart              — googleBooksBaseUrl, openLibraryBaseUrl/UserAgent, bookLookupTimeout, autoAddConfidenceThreshold (0.75)
 ├── core/recognition_log.dart        — debug-only [REC] dump: OCR lines + boxes, query, top match, and why a lookup missed. Source of test/fixtures
-├── models/book.dart                 — Book model, fromGoogleBooksJson + googleCoverUrl (600px, no page-curl), fromOpenLibraryJson, fromFirestore, toFirestore. publishedDate + `year` (leading four digits), isbn (ISBN-13 first)
+├── models/book.dart                 — Book model, fromGoogleBooksJson + googleCoverUrl (600px, no page-curl), fromOpenLibraryJson, fromFirestore, toFirestore. publishedDate + `year` (leading four digits), isbn (ISBN-13 first). `coreTitle` and `identityKey` define "same book" for the whole app
 ├── widgets/book_grid_tile.dart       — BookGridTile: one book in a 3-column grid (cover, title, author). Shared so library search (#100) renders identically; `gridAspectRatio` lives here beside the layout it describes. Tapping any tile opens the detail sidebar
 ├── models/pending_book.dart
 ├── services/book_recognition_service.dart  — ML Kit OCR → OcrResult. Holds ONE lazily-created TextRecognizer for the service's life — one per photo crashed iOS (#120) (per-line text + bounding box + imageHeight + isScreenshot). Normalizes iOS's transposed boxes here (#94) so the query builder sees Android geometry
-├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText. _fetchBooks = Google Books, falling back to Open Library only on timeout/429/5xx
-├── services/book_repository.dart    — BookRepository: addBook (returns doc id, null if dup), addBooks (one WriteBatch for import), deleteBook, watchBooks. Dedup = same googleBooksId OR same title+author (catches different Google Books editions)
+├── services/books_api_service.dart  — query builder, fuzzy rerank, confidence, searchByText, findEditions (Google only) + editionsOf. _fetchBooks = Google Books, falling back to Open Library only on timeout/429/5xx
+├── services/book_repository.dart    — BookRepository: addBook (returns doc id, null if dup), addBooks (one WriteBatch for import), deleteBook, changeEdition, watchBooks. Dedup = same googleBooksId OR same title+author (catches different Google Books editions)
 ├── providers/recognition_provider.dart     — bookRepositoryProvider (+ RecognitionNotifier, now unused — kept in case the camera flow ever wants a single-photo notifier)
 ├── providers/import_provider.dart   — ImportNotifier: importImages routing (collects confident matches → one batched addBooks after the loop), approval queue, autoAdded list, undoAutoAdd/approveTop/rejectTop, addedCount/alreadyInLibrary/reviewCount/progress
 ├── providers/books_provider.dart    — booksStreamProvider: StreamProvider<List<Book>> wrapping watchBooks()
@@ -728,7 +737,8 @@ bookshelf_app/lib/
 ├── screens/import_screen.dart       — Import tab: Choose Photos → routing (progress) → summary popup → review queue
 ├── screens/approval_screen.dart     — Tinder swipe review card (keyed _ReviewCard: drag/animations, see-other-matches, no-OCR/complete states)
 ├── screens/manual_search_screen.dart — debounced live Google Books search, returns the picked Book
-├── screens/book_detail_sidebar.dart — Step 7: showBookDetail → right-hand sidebar route. 4:5 cover header, genre/title/author, YEAR | PAGES, 3-line synopsis with Read more; ⋯ → Remove from library
+├── screens/book_detail_sidebar.dart — Step 7: showBookDetail → right-hand sidebar route. 4:5 cover header, genre/title/author, YEAR | PAGES, 3-line synopsis with Read more; ⋯ → Change cover / Remove from library. Watches the live book
+├── screens/change_cover_screen.dart — Step 7a: grid of editions with a cover (current first, outlined); picking one overwrites the edition fields
 └── screens/placeholder_screen.dart  — Reusable placeholder for the Search and Discover tabs (Home/Capture/Import are real)
 ```
 
