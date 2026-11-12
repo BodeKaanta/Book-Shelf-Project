@@ -44,6 +44,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# AGP 9.1.1 writes reports here (Flutter 3.50 toolchain bump). Generated, and
+# untracked noise makes a clean branch read dirty — the #87 problem again.
+/android/build/
+
 # Environment variables — never commit API keys
 .env
 

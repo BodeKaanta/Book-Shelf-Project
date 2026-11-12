@@ -11,7 +11,14 @@ Flutter/Dart mobile app (Android-first; **iOS pulled forward from Phase 2 to unb
 
 A stale copy may still exist at `C:\Users\bodek\OneDrive\Documents\Bookshelf App\Book-Shelf-Project` pending deletion. **Check you are in `C:\dev` before editing** — edits have landed in the wrong copy before. Note Windows' shell "Documents" is redirected into OneDrive, so `C:\Users\bodek\Documents` is a *different*, non-synced folder from the one Explorer shows.
 
-**Second working copy on a Mac: `/Users/suvikaanta/dev/Book-Shelf-Project`** — Bode's sister's MacBook, added Sep 2026 to build iOS. It is a normal clone; git is the only thing that moves work between the two machines. The four files git will never carry have to be hand-copied — on the Mac only `.env` is actually needed (see "iOS + Beta Distribution").
+**Mac working copies.** Both are normal clones; **git is the only thing that moves work between machines** — an uncommitted change on one is invisible to the other, so never plan work that depends on carrying uncommitted edits across. The four files git will never carry have to be hand-copied; on a Mac only `.env` is actually needed (see "iOS + Beta Distribution").
+
+| Machine | Path | Status |
+|---|---|---|
+| Bode's sister's MacBook | `/Users/suvikaanta/dev/Book-Shelf-Project` | Added Sep 2026, borrowed occasionally |
+| **Bode's dad's MacBook** | `/Users/bodekaanta/dev/Book-Shelf-Project` | **Added Nov 2026, available until ~mid-Nov then handed over** |
+
+**On dad's MacBook Bode's account was not an admin**, and the Xcode/Homebrew setup needs `sudo`. Fix is **System Settings → Users & Groups → ⓘ beside the account → "Allow this user to administer this computer"**, authenticating as dad — then **log out and back in**, because the group change does not reach sessions already running. When handing the laptop over, reverse it and also sign out of Xcode (Settings → Accounts) and `gh auth logout`: the Apple Developer account is the one credential here that cannot be casually undone.
 
 ## Team
 - **Bode** (me): sole developer
@@ -190,11 +197,41 @@ So: **an alert, not a cap.** ⋮ on the *Queries per day* row → alert at ~700.
 - **Before public launch:** enable Firebase App Check, restrict the Firebase keys, and split the Books key in two as above. The Android half was the only one recorded here until 28 Sep, written when Android was shipping first — iOS shipped first in the end, so following this list literally would have left the shipping platform unrestricted.
 - Never commit secrets to git. If a real secret is ever needed (paid API, etc.), it belongs behind a Cloud Function — never in the app.
 
+## Toolchain — keep the Flutter versions matched
+
+**Flutter 3.50.0 on both machines (Nov 2026).** Windows was on **3.44.0** (May 2026) while the new Mac got the latest from `brew install --cask flutter`, and that skew is not cosmetic: `matcher`, `meta`, `test_api` and `vector_math` are pinned by the SDK, so each machine's `flutter pub get` rewrote `pubspec.lock` to its own versions and the file never stopped showing as modified. Windows was silently **downgrading** it on every command — including `flutter test` and `flutter devices`, which run an implicit resolve.
+
+That churn is not just noise. Lockfiles are committed deliberately (`pubspec.lock`, `ios/Podfile.lock`, `ios/**/swiftpm/Package.resolved`) so a clean clone — **above all Codemagic, which builds from a fresh clone every time** — resolves exactly what was tested. Two SDK versions means that guarantee quietly stops holding. Check `flutter --version` on both machines before cutting a build.
+
+Windows was upgraded with `flutter upgrade` (SDK at `C:\Users\bodek\Downloads\flutter`, a git checkout on `stable`). It refuses while the SDK's own tree is dirty; the `pubspec.lock` it leaves modified is SDK-internal and safe to `git checkout --`. All 66 tests pass on 3.50.0 and `flutter analyze` reports no errors.
+
+**⚠️ `package:flutter/material.dart` is deprecated as of 3.47** in favour of `package:material_ui/material_ui.dart` — every one of the 13 files importing it now warns. **Info-level only: nothing is broken and nothing needs doing yet.** It is recorded because it is a framework-direction change that becomes a real migration later, and because the warnings will otherwise look alarming on a fresh `flutter analyze`. Do not start that migration mid-beta.
+
+`flutter pub get` on 3.50 also auto-adds `macos/**` and `linux/**` to `analysis_options.yaml`'s excludes. Keep it — reverting only makes it reappear on the next resolve, which is precisely the churn #87 removed.
+
+**The upgrade forced an Android toolchain bump, and it surfaces one gate at a time.** 3.50 raised both floors, and the build fails on only the first until that is fixed — so expect two rounds, not one:
+
+| | Was | Flutter 3.50 minimum | Where |
+|---|---|---|---|
+| Gradle wrapper | 9.1.0 | **9.3.1** | `android/gradle/wrapper/gradle-wrapper.properties` → `distributionUrl` |
+| Android Gradle Plugin | 9.0.1 | **9.1.1** | `android/settings.gradle.kts` → `com.android.application` version |
+
+Kotlin 2.3.20 needed no change. Verified after the bump: debug APK builds, **release `appbundle` builds** (R8 clean — and per the Android section that is release-only, so debug alone proves nothing), and `keytool -printcert -jarfile` still reports `CN=Bode Kaanta` rather than `CN=Android Debug`. The error message offers `--android-skip-build-dependency-validation`; **do not use it** — it defers a real incompatibility to a less convenient moment.
+
+**⚠️ New warning, not yet actionable: `image_picker_android` applies the Kotlin Gradle Plugin,** and Flutter says *"future versions of Flutter will fail to build if your app uses plugins that apply KGP."* Nothing breaks today. `image_picker_android` is also nine patches behind (0.8.13+17 vs +25), so the eventual fix is probably just the plugin bump that #133 may want anyway — **both** platform implementations of `image_picker` are stale. Not a reason to bump blind; see #133.
+
 ## Release Builds (Android)
 ```
 flutter build appbundle --dart-define-from-file=.env
 ```
 The dart-define is **mandatory again (#81)** — Google Books is primary and needs the key. The trap: `main()`'s assert is **stripped in release**, so a keyless release build fails *silently*. Since #81 it fails quietly in a new way — every lookup 429s and falls through to the Open Library fallback, so recognition still half-works and the missing key is even harder to spot. Always verify the flag was passed.
+
+**Sideload APKs (for Richie, or anyone without Play access) all go to `C:\dev\apks`**, named `Bookedex-android-<YYYY-MM-DD>.apk`. Flutter always writes to `build/app/outputs/flutter-apk/app-release.apk`, which the next build overwrites, so copy it out:
+```
+flutter build apk --release --dart-define-from-file=.env
+Copy-Item build\app\outputs\flutter-apk\app-release.apk C:\dev\apks\Bookedex-android-<date>.apk
+```
+Check the signer with `apksigner verify --print-certs` (Android SDK `build-tools`), not `keytool`. With minSdk 24 the APK carries only a v2 signature, which `keytool -printcert` can't read, so it prints nothing at all.
 
 **Signing:** upload keystore at `C:\Users\bodek\keys\bookedex-upload-keystore.jks` (alias `upload`, RSA 2048, valid to Dec 2053), deliberately **outside the repo**. `android/key.properties` holds the path + passwords; it and `*.jks` / `*.keystore` are gitignored. `build.gradle.kts` falls back to debug signing when `key.properties` is absent, so a fresh clone still configures and `flutter run` works — meaning **a machine without those files silently produces a debug-signed bundle that Play will reject.** Verify with `keytool -printcert -jarfile <aab>`; it must show `CN=Bode Kaanta`, not `CN=Android Debug`.
 
@@ -395,9 +432,22 @@ Internal testing needs neither the review nor the policy — only a build and te
 
 ### Mac session runbook — uploading a build
 
-**Read this before touching the Mac.** The session happens on a borrowed MacBook (`/Users/suvikaanta/dev/Book-Shelf-Project`) under time pressure. Target: build uploaded and processed **before** the release meeting, so the meeting is one button and not a debugging session.
+**Read this before touching the Mac.** The session happens on a borrowed MacBook under time pressure (paths in "Where the code lives"). Target: build uploaded and processed **before** the release meeting, so the meeting is one button and not a debugging session.
 
 **Carry with you.** `.env` into `bookshelf_app/` — it is gitignored, so a fresh clone will not have it, and without it every Google Books lookup 429s into the Open Library fallback. The `.p8` is **not** needed: it is for Codemagic, and Xcode signs via an Apple ID login instead.
+
+**On a brand-new Mac, two things bite before any of the below.** Both cost a session on dad's MacBook in Nov 2026:
+
+- **`sudo` is refused** if the account is not an admin — see "Where the code lives" for the fix. Every `xcodebuild` step needs it.
+- **Gatekeeper quarantines the Flutter SDK.** `flutter doctor` throws *"gen_snapshot not opened — Apple could not verify it is free of malware."* The engine artifacts are downloaded, so macOS tags them `com.apple.quarantine`. Do **not** approve them one at a time in Privacy & Security; there are dozens. Strip the whole SDK:
+  ```
+  flutter --version --machine | grep flutterRoot     # find the SDK
+  xattr -dr com.apple.quarantine /opt/homebrew/Caskroom/flutter
+  flutter precache --ios
+  ```
+  `gen_snapshot` is the **AOT compiler**, so a debug build may limp along without it and `flutter build ipa` cannot. Left unfixed it surfaces at the exact moment you are trying to produce the build. `precache --ios` pulls the iOS artifacts up front so any *other* quarantined binary shows now rather than mid-build.
+
+**Commands run from `bookshelf_app/`, not the repo root.** The repo root holds only `CLAUDE.md`, `docs/` and the Firebase config — there is no `ios/` there, so `cd ios && pod install` fails instantly with no useful message. `head -1 pubspec.yaml` should read `name: bookshelf_app`. **`flutter pub get` must run before `pod install`**: `ios/Flutter/Generated.xcconfig` is generated, not cloned, and the Podfile raises without it.
 
 **Do first, before anything else.** Sign Xcode in: **Xcode → Settings → Accounts → +**. Verify with:
 ```
@@ -438,6 +488,10 @@ Distribute App → App Store Connect → Upload. Then watch **App Store Connect 
 | "can only be launched from Flutter tooling" on the device | Normal for debug: the JIT needs a debugger attached | `flutter run --release --dart-define-from-file=.env -d <id>` |
 | Build number rejected as already used | `version:` not bumped | Bump the `+N` in `pubspec.yaml` |
 | Simulator build fails to link ML Kit | No arm64 simulator slices exist | Physical device only — this is not fixable |
+| `"gen_snapshot" not opened — Apple could not verify it is free of malware` | Gatekeeper quarantined the downloaded SDK | `xattr -dr com.apple.quarantine <flutterRoot>` — see above. Never approve per-binary |
+| `sudo: a password is required` / account cannot authenticate | The account is not an admin | Users & Groups → ⓘ → allow administering, **then log out and back in** |
+| `cd ios` → no such file or directory | Standing in the repo root, not `bookshelf_app/` | `cd bookshelf_app` first |
+| `Generated.xcconfig must exist` from `pod install` | `flutter pub get` not run yet | Run it; the file is generated, never cloned |
 
 **Shipping any change means a whole new build — there is no over-the-air update.** Flutter release builds are AOT-compiled into the binary and Apple forbids downloading executable code, so a one-line colour tweak costs exactly what a feature does: bump the `+N`, rebuild **on a Mac**, upload, wait for processing. Apple's review is *not* the expensive part (internal testers get it as soon as it processes; a later build at the same version usually skips full review) — **Mac access is**. Batch up whatever you want in a beta before giving the laptop back, or set up Codemagic.
 
@@ -638,13 +692,22 @@ The deck animates forward off the existing fly-out `AnimationController` (gated 
 
 **Follow-ups filed as issues:**
 - **#93 (iOS: crash on the first "Use Photo" after capture)** — **read #120 first: it may share a root.** #120 was the same `MLKAnalyticsLogger`/`NSUserDefaults` path, crashing while *constructing* a recognizer; #93 was a single construction against uninitialised first-run state. Plausible, unproven. Note TestFlight now has the dSYMs, so a recurrence arrives symbolicated — which is what #93 was always blocked on. — killed the app once on the first camera capture after a fresh install, never reproduced. Ruled out: the Flutter tooling detaching, and a missing usage-description string (both are present, and that class kills the process *every* time). Leading theory is memory pressure — "Use Photo" is peak memory (full-res capture + JPEG encode + ML Kit's first model load) on a 3GB iPad. **Do not "fix" it by downscaling capture**: that reverses the deliberate full-resolution decision that protects thin/vertical cover text. If it was a memory kill there is no `Runner` crash report to find — iOS records those as system-wide `JetsamEvent-*.ips`. Blocked on crash visibility: `devicectl sysdiagnose` fails and nothing syncs to the Mac, which is why TestFlight (dSYMs upload, so reports arrive symbolicated) and Firebase Crashlytics matter.
-- **#133 (iOS: crash on the first large import after a fresh install)** — build 5 from TestFlight, first launch, 19 photos, crashed as the picker returned. The identical import then ran twice with no crash. `EXC_CRASH (SIGABRT)`, and the backtrace is `__exceptionPreprocess` → `objc_exception_throw` → `_copyDescription` → `___forwarding___` → `_CF_forwarding_prep_0`: the **"unrecognized selector sent to instance"** path, which in practice means a **freed object whose address was reused**. Same *class* as #120, different place entirely — **there are zero ML Kit symbols in the file**, so it is neither #120 nor #93's ML Kit theory. It ran on the main queue via `_dispatch_call_block_and_release` called from Flutter, which is the shape of a plugin delivering a result back to Dart; `image_picker`'s Objective-C is statically linked into `Runner`, which is why those frames are attributed there. **Do not attempt a fix until the frames are symbolicated** — App Store Connect → TestFlight → Crashes has the dSYMs and will name them. Two of three theories that night were wrong and the report settled it in minutes.
+- **#133 (iOS: crash on the first large import after a fresh install)** — build 5 from TestFlight, first launch, 19 photos, crashed as the picker returned. The identical import then ran twice with no crash. `EXC_CRASH (SIGABRT)`, and the backtrace is `__exceptionPreprocess` → `objc_exception_throw` → `_copyDescription` → `___forwarding___` → `_CF_forwarding_prep_0`: the **"unrecognized selector sent to instance"** path, which in practice means a **freed object whose address was reused**. Same *class* as #120, different place entirely — **there are zero ML Kit symbols in the file**, so it is neither #120 nor #93's ML Kit theory. It ran on the main queue via `_dispatch_call_block_and_release` called from Flutter, which is the shape of a plugin delivering a result back to Dart; `image_picker`'s Objective-C is statically linked into `Runner`, which is why those frames are attributed there. **Do not attempt a fix until the frames are symbolicated.** Two of three theories that night were wrong and the report settled it in minutes.
+
+  **Symbolication needs the Mac, and that is the whole blocker.** The `.ips` readable on the device (Settings → Privacy & Security → Analytics & Improvements → Analytics Data) is **unsymbolicated** — it gives the crash's *shape* and nothing else, which is as far as Nov 2026 got. The frames get named by **Xcode → Window → Organizer → Crashes**, which resolves them against the dSYMs build 5 uploaded. Budget ten minutes for it and do it *first*: it decides every step after it, and guessing ahead of it has already cost one session.
+
+  **Reproducing it is first-run-only.** Build 5 crashed on the first launch after a fresh install with 19 photos; the identical import then ran twice clean. So a repro attempt means **delete the app, reinstall, import ~19 immediately** — a loop that was impossible before a Mac was on hand, and the reason this issue sat open.
+
+  **Live lead, unconfirmed:** `image_picker_ios` is pinned at **0.8.13+6** against a current **0.8.13+15** (and `image_picker` 1.2.2 vs 1.2.4) — nine patch releases behind on the exact plugin whose Objective-C sits in the backtrace, for a crash that fires *as the picker returns*. Plausible, but **read the frames before bumping it**: a first-run-only crash that merely stops reproducing cannot be shown to be fixed, and a blind bump destroys the evidence. If the frames do name `image_picker`, the bump is the first thing to try.
   - **This also disproves the memory theory for good.** A memory termination reports `EXC_RESOURCE` and lands in a system-wide `JetsamEvent-*.ips`, not a `Runner-*.ips`. The idea that `image_picker` decoding 19 photos at full resolution exhausts a 3GB iPad has now failed to explain two separate crashes. Stop reaching for it.
   - **Reading a crash report needs no Mac.** On the device: **Settings → Privacy & Security → Analytics & Improvements → Analytics Data**, then find `Runner-<date>.ips`. The file is JSON; `exception`, `termination`, `asi`, `lastExceptionBacktrace` and `usedImages` are the fields worth reading, and frames map to libraries through `imageIndex`.
 - **#66 (Option B import UX)** — process in the background, drop the user on their Library (auto-adds stream in live), show an in-app "N ready to review" prompt when done. Better for large camera-roll imports than the blocking loader, and the real fix for the residual per-book OCR hiccup (OCR can't be moved off the main isolate with this plugin).
 - ✅ **#87 (delete `linux/`, `macos/`, `windows/`) — done.** Seven generated plugin-registrant files used to show as modified after **every** `flutter pub get` (including the implicit ones inside `dart run flutter_launcher_icons` and `flutterfire configure`) with **zero content change**: Flutter writes LF, Windows Git checks out CRLF. It made a clean `main` read as dirty (`main*` in VS Code) and cost real diagnosis time. **Deleting the folders was necessary but not sufficient** — `flutter pub get` still regenerates the registrant stubs into those paths (an empty `windows/`, three files under `linux/flutter/`, `macos/Flutter/`), so they came straight back as *untracked* noise instead of modified noise. The fix is both halves: the tracked scaffolding is deleted **and** `/linux/`, `/macos/`, `/windows/` are gitignored. Desktop is not a build target — Android + iOS only — so if it were ever wanted, `flutter create --platforms=windows .` regenerates it.
 - **#100 (search your own library)** — requested by Richie; there is currently no way to find a book you already own. One screen, opened from the bottom-nav Search tab *and* a search icon in the Library AppBar. Filters `booksStreamProvider` **in memory** rather than querying Firestore: Firestore has no substring search (server-side would mean a third-party index like Algolia), the free tier caps at 100 books, and in-memory also works offline at no read cost. `_GridTile` is private to `library_screen.dart` and should be extracted so search results match the grid instead of drifting from it.
 - **#101 (wire up the Library sort control)** — see the warning under Dashboard Design Notes. Small, and already specified by MVP scope.
+- ✅ **#138 (a refused picker permission stranded the loader) — done, PR #139.** `image_picker` reports a refusal by **throwing a `PlatformException`**, not by returning null, so the refusal skipped the `image == null` cancel path and Capture sat on "Recognizing…" with no way out. Both pickers now catch it. A permission denial names the way back ("You can allow it in Settings") because **iOS asks for the camera only once** — after a refusal the pick fails instantly and Settings is genuinely the only route, so without saying so the screen reads as broken rather than blocked. Import got the same guard: the system photo pickers on iOS and Android 13+ need no permission, so `photo_access_denied` is rare there, but any other picker failure stranded the loader identically.
+  - **A second bug lived in the same two lines.** `beginPicking`/`cancelPicking` assigned a fresh `const ImportState()`, which also wiped `queue` — so backing out of the picker **discarded books still waiting for review from an earlier import**. They now `copyWith` the loading flags alone. Nothing reported this; it was found only because those lines had to be touched.
+  - `test/picker_refused_test.dart` drives a fake `ImagePickerPlatform` that throws the way the real one does, covering both screens, the surviving queue, and a non-permission failure. **The Import half cannot be tested on an Android 13+ device at all** (no permission is ever requested), so the test is the only coverage there.
 
 **Ideas not yet created:**
 - `inauthor:`-constrained retrieval — only worth it if beta shows common-title ambiguity is a recurring pain. **Test it first:** in Oct 2026 `intitle:`/`inauthor:` returned **nothing** for five of six of Margot's books (`inauthor:calvino`, `intitle:overstory`), while working for Project Hail Mary — see Change cover under Step 7.
