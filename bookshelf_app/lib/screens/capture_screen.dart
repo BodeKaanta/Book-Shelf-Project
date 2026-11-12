@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../providers/import_provider.dart';
@@ -65,7 +66,24 @@ class CaptureScreen extends ConsumerWidget {
     // Full resolution on purpose: a single capture is one image, so the OCR
     // cost is a one-time wait (not a per-book hiccup like batch import) — worth
     // it for the best recognition, including thin/vertical cover text.
-    final image = await ImagePicker().pickImage(source: ImageSource.camera);
+    final XFile? image;
+    try {
+      image = await ImagePicker().pickImage(source: ImageSource.camera);
+    } on PlatformException catch (error) {
+      // A refused permission arrives as an error, not as a cancel, so without
+      // this the loader never cleared (#138). iOS asks only once: after a
+      // refusal it fails straight away, and Settings is the only way back.
+      notifier.cancelPicking();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(error.code == 'camera_access_denied'
+              ? 'Bookedex needs camera access to photograph a cover. '
+                  'You can allow it in Settings.'
+              : "Couldn't open the camera."),
+        ));
+      }
+      return;
+    }
     if (image == null) {
       notifier.cancelPicking();
       return;

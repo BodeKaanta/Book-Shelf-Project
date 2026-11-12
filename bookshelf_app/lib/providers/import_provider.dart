@@ -74,9 +74,14 @@ class ImportNotifier extends StateNotifier<ImportState> {
   // renders frames again *before* the picked files arrive over the platform
   // channel. Showing the loader up front stops the start screen flashing in
   // that gap.
-  void beginPicking() => state = const ImportState(importing: true);
+  //
+  // Only the loading flags change: a pick that is cancelled or refused adds
+  // nothing, so books still waiting for review from an earlier import must
+  // survive it (#138).
+  void beginPicking() =>
+      state = state.copyWith(importing: true, processed: 0, total: 0);
 
-  void cancelPicking() => state = const ImportState();
+  void cancelPicking() => state = state.copyWith(importing: false);
 
   Future<void> importImages(List<XFile> images) async {
     state = ImportState(importing: true, total: images.length);

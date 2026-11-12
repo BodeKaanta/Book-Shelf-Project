@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../providers/import_provider.dart';
@@ -102,11 +103,28 @@ class ImportScreen extends ConsumerWidget {
     // Downscale natively at pick time — ML Kit on a ~2000px image instead of a
     // full 12MP photo is far lighter and keeps the UI responsive. Cover text
     // stays legible at this size.
-    final images = await ImagePicker().pickMultiImage(
-      maxWidth: 2000,
-      maxHeight: 2000,
-      imageQuality: 90,
-    );
+    final List<XFile> images;
+    try {
+      images = await ImagePicker().pickMultiImage(
+        maxWidth: 2000,
+        maxHeight: 2000,
+        imageQuality: 90,
+      );
+    } on PlatformException catch (error) {
+      // Same trap as Capture (#138): a picker error is not a cancel, and left
+      // uncaught it strands the loader. The system photo pickers on iOS and
+      // Android 13+ need no permission, so this is rare — but not impossible.
+      notifier.cancelPicking();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(error.code == 'photo_access_denied'
+              ? 'Bookedex needs photo access to import covers. '
+                  'You can allow it in Settings.'
+              : "Couldn't open your photos."),
+        ));
+      }
+      return;
+    }
     if (images.isEmpty) {
       notifier.cancelPicking();
       return;
