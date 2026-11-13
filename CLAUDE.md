@@ -199,9 +199,11 @@ So: **an alert, not a cap.** ⋮ on the *Queries per day* row → alert at ~700.
 
 ## Toolchain — keep the Flutter versions matched
 
-**Flutter 3.50.0 on both machines (Nov 2026).** Windows was on **3.44.0** (May 2026) while the new Mac got the latest from `brew install --cask flutter`, and that skew is not cosmetic: `matcher`, `meta`, `test_api` and `vector_math` are pinned by the SDK, so each machine's `flutter pub get` rewrote `pubspec.lock` to its own versions and the file never stopped showing as modified. Windows was silently **downgrading** it on every command — including `flutter test` and `flutter devices`, which run an implicit resolve.
+**Flutter 3.50.0 on both machines (Nov 2026).** Windows was on **3.44.0** (May 2026) and dad's MacBook on **3.47.9** — the Homebrew cask's newest, which lags stable — and that skew is not cosmetic: `matcher`, `meta`, `test_api` and `vector_math` are pinned by the SDK, so each machine's `flutter pub get` rewrote `pubspec.lock` to its own versions and the file never stopped showing as modified. Windows was silently **downgrading** it on every command — including `flutter test` and `flutter devices`, which run an implicit resolve.
 
 That churn is not just noise. Lockfiles are committed deliberately (`pubspec.lock`, `ios/Podfile.lock`, `ios/**/swiftpm/Package.resolved`) so a clean clone — **above all Codemagic, which builds from a fresh clone every time** — resolves exactly what was tested. Two SDK versions means that guarantee quietly stops holding. Check `flutter --version` on both machines before cutting a build.
+
+**The Mac was upgraded 13 Nov** with `flutter upgrade` (the cask's SDK at `/opt/homebrew/share/flutter` is a git checkout on `stable`, so this works where `brew upgrade` cannot), then `xattr -dr com.apple.quarantine /opt/homebrew/Caskroom/flutter` and `flutter precache --ios` per the Gatekeeper note below. **⚠️ Never run `flutter upgrade` from inside `bookshelf_app/`:** it also upgraded ~40 packages in the project's `pubspec.lock` (`image_picker_ios` +6 → +15 among them). Run it from `~`; afterwards `git checkout -- pubspec.lock` and a plain `flutter pub get` should leave the file untouched — that is the check that the two machines really match.
 
 Windows was upgraded with `flutter upgrade` (SDK at `C:\Users\bodek\Downloads\flutter`, a git checkout on `stable`). It refuses while the SDK's own tree is dirty; the `pubspec.lock` it leaves modified is SDK-internal and safe to `git checkout --`. All 66 tests pass on 3.50.0 and `flutter analyze` reports no errors.
 
@@ -373,11 +375,11 @@ The policy describes **current** behaviour on purpose, including two unflatterin
 
 ### Beta status — 28 Sep 2026
 
-**Build `1.0.0 (5)` is uploaded to App Store Connect**, and `1.0.0 (4)` before it. Build 4 was the first binary this project ever sent to Apple and ended the Mac-only part of the beta; build 5 adds the icon-palette theme (#126). Build 4 stays in TestFlight as a fallback.
+**Build `1.0.0 (6)` is uploaded to App Store Connect (13 Nov, #142)**, after `1.0.0 (5)` and `1.0.0 (4)`. Build 4 was the first binary this project ever sent to Apple and ended the Mac-only part of the beta; build 5 added the icon-palette theme (#126); **build 6 carries the #133 fix** — every install of 4 and 5 crashes once, on its first import or capture. Build 6 was verified from TestFlight on the iPad by deleting the app first and importing straight away; without the delete the crash path never runs. **Never route testers back to 4 or 5.**
 
 **"Built" is not "uploaded", and conflating them wasted a session.** A local `flutter build ipa` is a build; transmitting the binary is a separate step. Builds 1 and 3 were both produced locally and never sent — 3 was archived and then found to crash (#120), so it must never be uploaded.
 
-`version:` is **`1.0.0+5`** (bumped in #128). Apple rejects a reused build number outright, so bump the `+N` again after every upload — including after a build that was only ever archived locally, as build 3 was.
+`version:` is **`1.0.0+6`** (bumped in #142). Apple rejects a reused build number outright, so bump the `+N` again after every upload — including after a build that was only ever archived locally, as build 3 was.
 
 **Submission prep finished 5–6 Oct.** Everything below is done; only the submission itself remains.
 
@@ -389,7 +391,7 @@ The policy describes **current** behaviour on purpose, including two unflatterin
 | Age Rating | **4+**, Age Categories = **Not Applicable** |
 | Beta App Description + Feedback Email | Set |
 | Beta App Review Information | Set |
-| Build 1.0.0 (5) | Installed from TestFlight on the iPad and exercised |
+| Build 1.0.0 (6) | Installed from TestFlight on the iPad after deleting the app, first import clean |
 | **Remaining** | External group → add build → Submit for Beta App Review |
 
 **The "linked to the user's identity" answer is Yes, and it is a judgement call worth not re-litigating.** The anonymous Firebase UID has no email or name attached, which makes "not linked" superficially tempting. Apple's own wording on that screen is *linked via their account, **device**, or details* — the UID is a persistent per-install identity that every book in a library hangs off. Apple's exemption requires de-identification applied **before collection that breaks the linkage**; never collecting a name is a different thing. It also matches the privacy policy, which says libraries are tied to an installation, and Apple compares the two. Over-declaring costs a slightly more conservative label; under-declaring risks a mismatch.
@@ -419,7 +421,7 @@ Remaining gates on the **external** (public-link) TestFlight track:
 
 | Gate | Where | Needs |
 |---|---|---|
-| ~~Upload a build~~ | Mac | ✅ **Done 28 Sep — `1.0.0 (4)`, then `1.0.0 (5)` with the theme.** Every remaining gate is App Store Connect web work and can be finished from Windows |
+| ~~Upload a build~~ | Mac | ✅ **Done 28 Sep — `1.0.0 (4)`, then `1.0.0 (5)` with the theme; `1.0.0 (6)` on 13 Nov with the #133 crash fix.** Every remaining gate is App Store Connect web work and can be finished from Windows |
 | App Information URLs + category | App Store Connect | Nothing; both URLs are live above |
 | App Privacy questionnaire | App Store Connect | Nothing; answers are recorded above |
 | Age rating questionnaire | App Store Connect | Nothing |
